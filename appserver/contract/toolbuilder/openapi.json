@@ -1,0 +1,45 @@
+{
+  "openapi": "3.0.3",
+  "info": {"title": "Tool Builder built-in app Connect API", "version": "v1"},
+  "x-appthrust-definition": "tool-builder",
+  "servers": [{"url": "/api/tool-builder/v1"}],
+  "security": [{"bearerAuth": []}],
+  "paths": {
+    "/tools": {
+      "get": {
+        "operationId": "listTools",
+        "summary": "List published tools for an application that the viewer may use",
+        "x-appthrust-link": true,
+        "x-appthrust-result-path": "items",
+        "parameters": [
+          {"name": "app", "in": "query", "required": true, "schema": {"type": "string"}, "description": "Application name, not display name or component ID"},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}}
+        ],
+        "responses": {
+          "200": {"description": "Live tools backed by a component of this application", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ToolList"}}}},
+          "400": {"description": "Invalid app or limit"},
+          "401": {"description": "Authentication required"},
+          "403": {"description": "Project membership required"},
+          "503": {"description": "A built-in app link is unavailable"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}},
+    "schemas": {
+      "Tool": {
+        "type": "object",
+        "required": ["slug", "name", "description", "url", "liveReleaseNumber"],
+        "properties": {
+          "slug": {"type": "string"},
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "url": {"type": "string", "x-go-name": "URL"},
+          "liveReleaseNumber": {"type": "integer"}
+        }
+      },
+      "ToolList": {"type": "object", "required": ["items"], "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/Tool"}}}}
+    }
+  }
+}

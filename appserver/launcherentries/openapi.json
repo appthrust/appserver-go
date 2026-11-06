@@ -1,0 +1,192 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Launcher Entries Capability",
+    "version": "1.0.0",
+    "description": "SDK-owned launcher.entries/v1 contract. Providers determine visibility, relation, state, and public URLs for the authenticated viewer; consumers compose these entries without interpreting provider domains. The viewer's bearer is forwarded without a machine identity."
+  },
+  "x-appthrust-capability": "launcher.entries/v1",
+  "servers": [
+    {
+      "url": ""
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/launcher/entries": {
+      "get": {
+        "operationId": "listEntries",
+        "description": "List entries for the authenticated viewer. Providers apply q to their own domain. Successful responses use Cache-Control: private, no-store; an empty result is an items array, never null.",
+        "x-appthrust-link": true,
+        "x-appthrust-result-path": "items",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Provider-owned search text, limited to 128 Unicode characters.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Entries visible to the viewer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntryList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query (invalid_query)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid viewer bearer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewer is not permitted to list entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Identity verification or the provider is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "Entry": {
+        "type": "object",
+        "required": ["id", "name", "description", "icon", "state", "relation", "tags"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string",
+            "description": "Icon key, never markup or a remote resource URL."
+          },
+          "url": {
+            "type": "string",
+            "description": "Public launch URL from the owning read model; present when state is ready. Never an internal origin or a constructed hostname.",
+            "x-go-name": "URL",
+            "x-go-type-skip-optional-pointer": true
+          },
+          "detailUrl": {
+            "type": "string",
+            "description": "Provider-owned public details URL, including for restricted entries.",
+            "x-go-name": "DetailURL",
+            "x-go-type-skip-optional-pointer": true
+          },
+          "state": {
+            "type": "string",
+            "enum": ["ready", "preparing", "restricted"]
+          },
+          "relation": {
+            "type": "string",
+            "enum": ["owner", "group", "project"]
+          },
+          "group": {
+            "$ref": "#/components/schemas/GroupRef"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "GroupRef": {
+        "type": "object",
+        "required": ["id", "name", "path"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "EntryList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Entry"
+            }
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error", "message"],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

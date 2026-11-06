@@ -1,0 +1,1202 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Directory API",
+    "version": "v1"
+  },
+  "x-appthrust-definition": "directory",
+  "servers": [
+    {
+      "url": "/api/directory/v1"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/me": {
+      "get": {
+        "operationId": "me",
+        "summary": "Current person, effective groups and Directory roles",
+        "x-appthrust-link": true,
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/people": {
+      "get": {
+        "operationId": "listPeople",
+        "summary": "Find people by name, identity or effective group",
+        "x-appthrust-link": true,
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "groupId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subject",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-appthrust-result-path": "items"
+      }
+    },
+    "/people/{id}": {
+      "get": {
+        "operationId": "getPerson",
+        "summary": "Person profile including memberships and talent",
+        "x-appthrust-link": true,
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonProfile"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/people/{id}/effective-groups": {
+      "get": {
+        "operationId": "effectiveGroups",
+        "summary": "Effective group IDs for a person",
+        "x-appthrust-link": true,
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectiveGroupsResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Effective groups unchanged; reuse ETag response"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/groups": {
+      "get": {
+        "operationId": "listGroups",
+        "summary": "Find groups by name and direct parent",
+        "x-appthrust-link": true,
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "parentId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          }
+        ],
+        "x-appthrust-result-path": "items"
+      }
+    },
+    "/groups/{id}/members": {
+      "get": {
+        "operationId": "listGroupMembers",
+        "summary": "Direct and inherited group memberships",
+        "x-appthrust-link": true,
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MembershipList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-appthrust-result-path": "items"
+      }
+    },
+    "/skills": {
+      "get": {
+        "operationId": "listSkills",
+        "summary": "Skill catalog and distribution",
+        "x-appthrust-link": true,
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-appthrust-result-path": "items"
+      }
+    },
+    "/skills/matrix": {
+      "get": {
+        "operationId": "skillsMatrix",
+        "summary": "People and skill cells in an effective group",
+        "x-appthrust-link": true,
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillMatrix"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/import": {
+      "post": {
+        "operationId": "import",
+        "summary": "Import portable Directory records (Directory admin only)",
+        "x-appthrust-link": true,
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRequest"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "Person": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "subject": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "avatarVersion": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "pending": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "subject",
+          "email",
+          "displayName",
+          "avatarVersion",
+          "pending"
+        ]
+      },
+      "Roles": {
+        "type": "object",
+        "properties": {
+          "directoryAdmin": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "directoryAdmin"
+        ]
+      },
+      "GroupRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "name"
+        ]
+      },
+      "Group": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "parentId": {
+            "type": "string",
+            "nullable": true,
+            "x-go-name": "ParentID"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true
+          },
+          "about": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true
+          },
+          "aboutUpdatedBy": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Person"
+              }
+            ],
+            "nullable": true
+          },
+          "aboutUpdatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "subgroupCount": {
+            "type": "integer",
+            "x-go-type-skip-optional-pointer": true
+          },
+          "memberCount": {
+            "type": "integer",
+            "x-go-type-skip-optional-pointer": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "parentId",
+          "name",
+          "slug",
+          "path",
+          "description",
+          "about",
+          "aboutUpdatedBy",
+          "aboutUpdatedAt",
+          "subgroupCount",
+          "memberCount",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "PersonMembership": {
+        "type": "object",
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/GroupRef"
+          },
+          "role": {
+            "type": "string"
+          },
+          "inheritedFrom": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "group",
+          "role",
+          "inheritedFrom"
+        ]
+      },
+      "Membership": {
+        "type": "object",
+        "properties": {
+          "groupId": {
+            "type": "string",
+            "x-go-name": "GroupID"
+          },
+          "person": {
+            "$ref": "#/components/schemas/Person"
+          },
+          "role": {
+            "type": "string"
+          },
+          "inheritedFrom": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "groupId",
+          "person",
+          "role",
+          "inheritedFrom"
+        ]
+      },
+      "SkillRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "categoryId": {
+            "type": "string",
+            "nullable": true,
+            "x-go-name": "CategoryID"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "label",
+          "categoryId",
+          "status"
+        ]
+      },
+      "PersonSkill": {
+        "type": "object",
+        "properties": {
+          "skill": {
+            "$ref": "#/components/schemas/SkillRef"
+          },
+          "level": {
+            "type": "integer",
+            "nullable": true
+          },
+          "interested": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "skill",
+          "level",
+          "interested"
+        ]
+      },
+      "Talent": {
+        "type": "object",
+        "properties": {
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PersonSkill"
+            }
+          },
+          "strengths": {
+            "type": "string"
+          },
+          "aspirations": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "skills",
+          "strengths",
+          "aspirations",
+          "updatedAt"
+        ]
+      },
+      "PersonProfile": {
+        "type": "object",
+        "properties": {
+          "person": {
+            "$ref": "#/components/schemas/Person"
+          },
+          "memberships": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PersonMembership"
+            }
+          },
+          "talent": {
+            "$ref": "#/components/schemas/Talent"
+          }
+        },
+        "required": [
+          "person",
+          "memberships",
+          "talent"
+        ]
+      },
+      "MeResponse": {
+        "type": "object",
+        "properties": {
+          "person": {
+            "$ref": "#/components/schemas/Person"
+          },
+          "effectiveGroupIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "EffectiveGroupIDs"
+          },
+          "roles": {
+            "$ref": "#/components/schemas/Roles"
+          }
+        },
+        "required": [
+          "person",
+          "effectiveGroupIds",
+          "roles"
+        ]
+      },
+      "EffectiveGroupsResponse": {
+        "type": "object",
+        "properties": {
+          "groupIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "GroupIDs"
+          }
+        },
+        "required": [
+          "groupIds"
+        ]
+      },
+      "PersonList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Person"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "GroupList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "MembershipList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Membership"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SkillCategory": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sort": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "sort"
+        ]
+      },
+      "Skill": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "categoryId": {
+            "type": "string",
+            "nullable": true,
+            "x-go-name": "CategoryID"
+          },
+          "status": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "levels": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "interested": {
+            "type": "integer"
+          },
+          "unrated": {
+            "type": "integer"
+          },
+          "people": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "label",
+          "categoryId",
+          "status",
+          "description",
+          "levels",
+          "interested",
+          "unrated",
+          "people"
+        ]
+      },
+      "SkillList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Skill"
+            }
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkillCategory"
+            }
+          }
+        },
+        "required": [
+          "items",
+          "categories"
+        ]
+      },
+      "MatrixPerson": {
+        "type": "object",
+        "properties": {
+          "person": {
+            "$ref": "#/components/schemas/Person"
+          },
+          "groupIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "GroupIDs"
+          }
+        },
+        "required": [
+          "person",
+          "groupIds"
+        ]
+      },
+      "MatrixCell": {
+        "type": "object",
+        "properties": {
+          "personId": {
+            "type": "string",
+            "x-go-name": "PersonID"
+          },
+          "skillId": {
+            "type": "string",
+            "x-go-name": "SkillID"
+          },
+          "level": {
+            "type": "integer",
+            "nullable": true
+          },
+          "interested": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "personId",
+          "skillId",
+          "level",
+          "interested"
+        ]
+      },
+      "SkillMatrix": {
+        "type": "object",
+        "properties": {
+          "people": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MatrixPerson"
+            }
+          },
+          "cells": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MatrixCell"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "people",
+          "cells",
+          "truncated"
+        ]
+      },
+      "ImportPerson": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "subject": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "avatar": {
+            "type": "string",
+            "format": "byte",
+            "x-go-type": "[]byte",
+            "x-go-type-skip-optional-pointer": true
+          },
+          "avatarContentType": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true
+          },
+          "avatarVersion": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "subject",
+          "email",
+          "displayName"
+        ]
+      },
+      "ImportGroup": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "parentId": {
+            "type": "string",
+            "nullable": true,
+            "x-go-name": "ParentID"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true
+          },
+          "about": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true
+          },
+          "aboutUpdatedBy": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Person"
+              }
+            ],
+            "nullable": true
+          },
+          "aboutUpdatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "subgroupCount": {
+            "type": "integer",
+            "x-go-type-skip-optional-pointer": true
+          },
+          "memberCount": {
+            "type": "integer",
+            "x-go-type-skip-optional-pointer": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "path"
+        ]
+      },
+      "ImportMembership": {
+        "type": "object",
+        "properties": {
+          "groupId": {
+            "type": "string",
+            "x-go-name": "GroupID"
+          },
+          "personId": {
+            "type": "string",
+            "x-go-name": "PersonID"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "groupId",
+          "personId",
+          "role"
+        ]
+      },
+      "ImportRequest": {
+        "type": "object",
+        "properties": {
+          "people": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportPerson"
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportGroup"
+            }
+          },
+          "memberships": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportMembership"
+            }
+          }
+        },
+        "required": [
+          "people",
+          "groups",
+          "memberships"
+        ]
+      },
+      "ImportCounts": {
+        "type": "object",
+        "properties": {
+          "people": {
+            "type": "integer"
+          },
+          "groups": {
+            "type": "integer"
+          },
+          "memberships": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "people",
+          "groups",
+          "memberships"
+        ]
+      },
+      "ImportConflict": {
+        "type": "object",
+        "properties": {
+          "entity": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity",
+          "id",
+          "reason"
+        ]
+      },
+      "ImportMerge": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "replaced": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "replaced"
+        ]
+      },
+      "ImportResult": {
+        "type": "object",
+        "properties": {
+          "imported": {
+            "$ref": "#/components/schemas/ImportCounts"
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportConflict"
+            }
+          },
+          "merged": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportMerge"
+            }
+          }
+        },
+        "required": [
+          "imported",
+          "conflicts",
+          "merged"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "message"
+        ]
+      }
+    }
+  }
+}

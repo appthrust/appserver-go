@@ -1,0 +1,69 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "OpenAI Chat Completions Capability",
+    "version": "1.0.0",
+    "description": "Provider-owned chat-completions.openai/v1 at an internal Service. No authentication is required and any bearer is ignored. An omitted model selects the provider default; an explicit model must be listed by GET /v1/models. Streaming uses text/event-stream with OpenAI chunks and a final data: [DONE] event. stream_options.include_usage requests a final usage chunk. Gateway consumers use the Project gateway base URL instead of provider credentials."
+  },
+  "x-appthrust-capability": "chat-completions.openai/v1",
+  "servers": [{"url": ""}],
+  "security": [],
+  "paths": {
+    "/v1/chat/completions": {
+      "post": {
+        "operationId": "createChatCompletion",
+        "x-appthrust-link": true,
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ChatRequest"}}}},
+        "responses": {
+          "200": {"description": "Completion, or SSE chunks followed by data: [DONE]", "content": {
+            "application/json": {"schema": {"$ref": "#/components/schemas/ChatCompletion"}},
+            "text/event-stream": {"schema": {"type": "string", "description": "SSE data events containing ChatCompletionChunk JSON, terminated by [DONE]."}}
+          }},
+          "400": {"description": "Invalid request or unsupported model", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "503": {"description": "Model not ready", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "operationId": "listModels", "x-appthrust-link": true, "x-appthrust-result-path": "data",
+        "responses": {"200": {"description": "Supported model objects, including provider prompt-budget metadata", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ModelList"}}}}}
+      }
+    },
+    "/healthz": {"get": {"operationId": "health", "responses": {"200": {"description": "Server is alive"}}}},
+    "/readyz": {"get": {"operationId": "ready", "responses": {"200": {"description": "Provider can accept completions"}, "503": {"description": "Model is preparing"}}}}
+  },
+  "components": {"schemas": {
+    "ChatRequest": {
+      "type": "object", "required": ["messages"], "additionalProperties": true,
+      "properties": {
+        "model": {"type": "string", "description": "Optional provider model ID; omitted selects its default."},
+        "messages": {"type": "array", "items": {"$ref": "#/components/schemas/Message"}},
+        "stream": {"type": "boolean"},
+        "stream_options": {"type": "object", "properties": {"include_usage": {"type": "boolean"}}}
+      }
+    },
+    "Message": {"type": "object", "required": ["role"], "additionalProperties": true, "properties": {"role": {"type": "string"}, "content": {"nullable": true, "description": "OpenAI text or content-part array."}}},
+    "Usage": {"type": "object", "required": ["prompt_tokens", "completion_tokens", "total_tokens"], "properties": {
+      "prompt_tokens": {"type": "integer", "format": "int64"}, "completion_tokens": {"type": "integer", "format": "int64"}, "total_tokens": {"type": "integer", "format": "int64"}
+    }},
+    "ChatCompletion": {"type": "object", "required": ["id", "object", "created", "model", "choices"], "properties": {
+      "id": {"type": "string", "x-go-name": "ID"}, "object": {"type": "string"}, "created": {"type": "integer", "format": "int64"}, "model": {"type": "string"},
+      "choices": {"type": "array", "items": {"type": "object", "required": ["index", "message", "finish_reason"], "properties": {"index": {"type": "integer"}, "message": {"$ref": "#/components/schemas/Message"}, "finish_reason": {"type": "string", "nullable": true}}}},
+      "usage": {"$ref": "#/components/schemas/Usage"}
+    }},
+    "ChatCompletionChunk": {"type": "object", "required": ["id", "object", "created", "model", "choices"], "properties": {
+      "id": {"type": "string", "x-go-name": "ID"}, "object": {"type": "string"}, "created": {"type": "integer", "format": "int64"}, "model": {"type": "string"},
+      "choices": {"type": "array", "items": {"type": "object", "required": ["index", "delta", "finish_reason"], "properties": {"index": {"type": "integer"}, "delta": {"$ref": "#/components/schemas/Delta"}, "finish_reason": {"type": "string", "nullable": true}}}},
+      "usage": {"$ref": "#/components/schemas/Usage"}
+    }},
+    "Delta": {"type": "object", "additionalProperties": true, "properties": {"role": {"type": "string"}, "content": {"type": "string", "nullable": true}}},
+    "Model": {"type": "object", "required": ["id", "object", "created", "owned_by"], "additionalProperties": true, "properties": {
+      "id": {"type": "string", "x-go-name": "ID"}, "object": {"type": "string"}, "created": {"type": "integer", "format": "int64"}, "owned_by": {"type": "string"},
+      "context_window": {"type": "integer", "description": "Provider context window in tokens."},
+      "appthrust.io/maxPromptTokens": {"type": "integer", "x-go-name": "MaxPromptTokens", "description": "Provider prompt-token budget for callers constructing prompts."}
+    }},
+    "ModelList": {"type": "object", "required": ["object", "data"], "properties": {"object": {"type": "string"}, "data": {"type": "array", "items": {"$ref": "#/components/schemas/Model"}}}},
+    "Error": {"type": "object", "required": ["error"], "properties": {"error": {"type": "object", "required": ["code", "message"], "properties": {"code": {"type": "string"}, "message": {"type": "string"}}}}}
+  }}
+}
