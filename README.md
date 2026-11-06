@@ -2,14 +2,16 @@
 
 Shared server contracts and helpers for AppThrust apps. This public module is
 the frozen contract from ADR-0072 D7, extracted from platform source
-`b80b58c71d`. Platform and apps consume the same versioned module; this module
-never imports `github.com/appthrust/platform`.
+`b80b58c71d`, with the AI policy contract extracted from `2c294ee1f5`.
+Platform and apps consume the same versioned module; this module never imports
+`github.com/appthrust/platform`.
 
 Import packages from:
 
 - `github.com/appthrust/appserver-go/accesskey`
 - `github.com/appthrust/appserver-go/apphealth`
 - `github.com/appthrust/appserver-go/aigatewaydiscovery`
+- `github.com/appthrust/appserver-go/aipolicy`
 - `github.com/appthrust/appserver-go/appserver/<package>`
 
 See [COMPATIBILITY.md](COMPATIBILITY.md) and the accepted
