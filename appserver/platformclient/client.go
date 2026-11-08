@@ -255,9 +255,16 @@ type AppInstallationDisplay struct {
 
 // ApplicationStackDefinition contains the catalog fields used by launchers.
 type ApplicationStackDefinition struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
+	ID          string                      `json:"id"`
+	Title       string                      `json:"title"`
+	Description string                      `json:"description"`
+	Locales     map[string]DefinitionLocale `json:"locales,omitempty"`
+}
+
+// DefinitionLocale contains the localized catalog copy used by launchers.
+type DefinitionLocale struct {
+	Title   string `json:"title,omitempty"`
+	Tagline string `json:"tagline,omitempty"`
 }
 
 // AppInstallation is the public installation read model. Link addresses come
@@ -295,7 +302,7 @@ type listMeta struct {
 func (c *Client) ApplicationStackDefinitions(ctx context.Context, bearer string) ([]ApplicationStackDefinition, error) {
 	var response struct {
 		Data []ApplicationStackDefinition `json:"data"`
-		Meta listMeta     `json:"meta"`
+		Meta listMeta                     `json:"meta"`
 	}
 	if err := c.get(ctx, bearer, "/api/v1/application-stack-definitions", &response); err != nil {
 		return nil, err
@@ -312,8 +319,8 @@ func (c *Client) ApplicationStackDefinitions(ctx context.Context, bearer string)
 // AppInstallations reads every installed built-in app in the Project as the bearer's user.
 func (c *Client) AppInstallations(ctx context.Context, bearer string) ([]AppInstallation, error) {
 	var response struct {
-		Data []AppInstallation       `json:"data"`
-		Meta listMeta `json:"meta"`
+		Data []AppInstallation `json:"data"`
+		Meta listMeta          `json:"meta"`
 	}
 	if err := c.get(ctx, bearer, "/api/v1/projects/"+url.PathEscape(c.ProjectID)+"/app-installations", &response); err != nil {
 		return nil, err
@@ -346,7 +353,7 @@ type ApplicationStack struct {
 func (c *Client) ApplicationStacks(ctx context.Context, bearer string) ([]ApplicationStack, error) {
 	var response struct {
 		Data []ApplicationStack `json:"data"`
-		Meta listMeta `json:"meta"`
+		Meta listMeta           `json:"meta"`
 	}
 	if err := c.get(ctx, bearer, "/api/v1/projects/"+url.PathEscape(c.ProjectID)+"/application-stacks", &response); err != nil {
 		return nil, err

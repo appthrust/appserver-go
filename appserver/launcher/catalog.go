@@ -3,6 +3,7 @@ package launcher
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -18,13 +19,20 @@ const (
 
 // Entry joins an installed app with its catalog display metadata.
 type Entry struct {
-	DefinitionID string `json:"definitionId"`
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	Icon         string `json:"icon"`
-	URL          string `json:"url"`
-	Phase        string `json:"phase"`
-	Current      bool   `json:"current"`
+	DefinitionID string                 `json:"definitionId"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description"`
+	Icon         string                 `json:"icon"`
+	URL          string                 `json:"url"`
+	Phase        string                 `json:"phase"`
+	Current      bool                   `json:"current"`
+	Locales      map[string]EntryLocale `json:"locales,omitempty"`
+}
+
+// EntryLocale contains localized launcher display copy.
+type EntryLocale struct {
+	Title   string `json:"title,omitempty"`
+	Tagline string `json:"tagline,omitempty"`
 }
 
 type Project struct {
@@ -63,7 +71,7 @@ func (c *Catalog) Load(ctx context.Context, subject, bearer string) (Snapshot, e
 	cached, found := c.cache[subject]
 	if found && c.now().Before(cached.expires) {
 		snapshot := cached.snapshot
-		snapshot.Entries = slices.Clone(snapshot.Entries)
+		snapshot.Entries = cloneEntries(snapshot.Entries)
 		c.mu.Unlock()
 		return snapshot, nil
 	}
@@ -101,10 +109,18 @@ func (c *Catalog) Load(ctx context.Context, subject, bearer string) (Snapshot, e
 		if display.Description == "" {
 			display.Description = definition.Description
 		}
+		var locales map[string]EntryLocale
+		if len(definition.Locales) > 0 {
+			locales = make(map[string]EntryLocale, len(definition.Locales))
+			for lang, locale := range definition.Locales {
+				locales[lang] = EntryLocale{Title: locale.Title, Tagline: locale.Tagline}
+			}
+		}
 		entries = append(entries, Entry{
 			DefinitionID: installation.DefinitionID, Name: display.Name, Description: display.Description,
 			Icon: display.Icon, URL: installation.URL, Phase: installation.Phase,
 			Current: installation.DefinitionID == c.self,
+			Locales: locales,
 		})
 	}
 	slices.SortFunc(entries, func(a, b Entry) int {
@@ -127,11 +143,19 @@ func (c *Catalog) Load(ctx context.Context, subject, bearer string) (Snapshot, e
 		delete(c.cache, oldestSubject)
 	}
 	c.cache[subject] = cachedSnapshot{
-		snapshot: Snapshot{Project: snapshot.Project, Entries: slices.Clone(entries)},
+		snapshot: Snapshot{Project: snapshot.Project, Entries: cloneEntries(entries)},
 		expires:  c.now().Add(cacheTTL),
 	}
 	c.mu.Unlock()
 	return snapshot, nil
+}
+
+func cloneEntries(entries []Entry) []Entry {
+	entries = slices.Clone(entries)
+	for i := range entries {
+		entries[i].Locales = maps.Clone(entries[i].Locales)
+	}
+	return entries
 }
 
 // Invalidate removes a subject's cached snapshot.

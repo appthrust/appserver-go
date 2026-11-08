@@ -354,7 +354,7 @@ func TestAppInstallationReadModels(t *testing.T) {
 		case "/api/v1/projects/pj-test/app-installations":
 			_, _ = w.Write([]byte(`{"data":[{"id":"directory","projectId":"pj-test","definitionId":"directory","stackId":"directory","display":{"name":"Directory","description":"People","icon":"directory"},"version":"1.4.0","availableVersion":"1.5.0","updatePolicy":"pinned","phase":"UpdateAvailable","url":"https://custom.example/directory","dependencies":[{"definitionId":"database","installation":"database","resolved":true}],"dependents":["builder-console"],"links":[],"capabilities":["launcher.entries/v1"],"conditions":[]}],"meta":{"total":1,"nextCursor":""}}`))
 		case "/api/v1/application-stack-definitions":
-			_, _ = w.Write([]byte(`{"data":[{"id":"directory","title":"Directory","description":"People and groups","category":"productivity","components":[]}],"meta":{"total":1}}`))
+			_, _ = w.Write([]byte(`{"data":[{"id":"directory","title":"Directory","description":"People and groups","locales":{"ja":{"title":"ディレクトリ","tagline":"人とグループ","overview":"Ignored","notes":"Ignored"}},"category":"productivity","components":[]}],"meta":{"total":1}}`))
 		default:
 			t.Errorf("unexpected path: %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -370,7 +370,7 @@ func TestAppInstallationReadModels(t *testing.T) {
 			Version: "1.4.0", AvailableVersion: "1.5.0", UpdatePolicy: "pinned",
 			Phase: "UpdateAvailable", URL: "https://custom.example/directory",
 			Dependencies: []AppInstallationDependency{{DefinitionID: "database", Installation: "database", Resolved: true}},
-			Dependents: []string{"builder-console"}, Links: []AppInstallationLink{}, Capabilities: []string{"launcher.entries/v1"},
+			Dependents:   []string{"builder-console"}, Links: []AppInstallationLink{}, Capabilities: []string{"launcher.entries/v1"},
 		}}
 		if err != nil || !reflect.DeepEqual(installations, wantAppInstallations) {
 			t.Fatalf("app installations = %#v, %v; want %#v", installations, err, wantAppInstallations)
@@ -378,6 +378,7 @@ func TestAppInstallationReadModels(t *testing.T) {
 		definitions, err := client.ApplicationStackDefinitions(context.Background(), "bearer caller-token")
 		wantDefinitions := []ApplicationStackDefinition{{
 			ID: "directory", Title: "Directory", Description: "People and groups",
+			Locales: map[string]DefinitionLocale{"ja": {Title: "ディレクトリ", Tagline: "人とグループ"}},
 		}}
 		if err != nil || !reflect.DeepEqual(definitions, wantDefinitions) {
 			t.Fatalf("definitions = %#v, %v; want %#v", definitions, err, wantDefinitions)
