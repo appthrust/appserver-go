@@ -17,9 +17,9 @@ import (
 )
 
 const (
-	projectPath     = "/api/v1/projects/pj-test"
+	projectPath       = "/api/v1/projects/pj-test"
 	installationsPath = "/api/v1/projects/pj-test/app-installations"
-	definitionsPath = "/api/v1/application-stack-definitions"
+	definitionsPath   = "/api/v1/application-stack-definitions"
 )
 
 func writeList(w http.ResponseWriter, data any) {
@@ -39,7 +39,7 @@ func TestCatalogJoinCurrentAndSort(t *testing.T) {
 		{ID: "directory", DefinitionID: "directory", Dependents: []string{"builder-console"}, Phase: "Degraded", URL: "https://custom.example/people", Display: platformclient.AppInstallationDisplay{Icon: "directory"}},
 	}
 	definitions := []platformclient.ApplicationStackDefinition{
-		{ID: "portal", Title: "Catalog Home", Description: "The installation display takes precedence"},
+		{ID: "portal", Title: "Catalog Home", Description: "The installation display takes precedence", Locales: map[string]platformclient.DefinitionLocale{"ja": {Title: "ホーム", Tagline: "インストール済みのアプリ"}}},
 		{ID: "tool-builder", Title: "Shared", Description: "Tools"},
 		{ID: "knowledge", Title: "Shared", Description: "Knowledge"},
 		{ID: "directory", Title: "Directory", Description: "People"},
@@ -73,13 +73,34 @@ func TestCatalogJoinCurrentAndSort(t *testing.T) {
 			snapshot, err := catalog.Load(context.Background(), "viewer", "bearer viewer")
 			want := []Entry{
 				{DefinitionID: "directory", Name: "Directory", Description: "People", Icon: "directory", URL: "https://custom.example/people", Phase: "Degraded", Current: self == "directory"},
-				{DefinitionID: "portal", Name: "Home", Description: "Every installed app", Icon: "layout-dashboard", URL: "https://custom.example/home", Phase: "Ready", Current: self == "portal"},
+				{DefinitionID: "portal", Name: "Home", Description: "Every installed app", Icon: "layout-dashboard", URL: "https://custom.example/home", Phase: "Ready", Current: self == "portal", Locales: map[string]EntryLocale{"ja": {Title: "ホーム", Tagline: "インストール済みのアプリ"}}},
 				{DefinitionID: "knowledge", Name: "Shared", Description: "Knowledge", Icon: "book", URL: "https://custom.example/knowledge", Phase: "Pending"},
 				{DefinitionID: "tool-builder", Name: "Shared", Description: "Tools", Icon: "wrench", URL: "https://custom.example/tools", Phase: "UpdateAvailable"},
 				{DefinitionID: "missing", Name: "missing", Phase: "Degraded"},
 			}
 			if err != nil || snapshot.Project != (Project{ID: "pj-test", Name: "開発チーム"}) || !reflect.DeepEqual(snapshot.Entries, want) {
 				t.Fatalf("snapshot = %#v, %v; want project and entries %#v", snapshot, err, want)
+			}
+			encoded, err := json.Marshal(snapshot.Entries)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var entries []map[string]json.RawMessage
+			if err := json.Unmarshal(encoded, &entries); err != nil {
+				t.Fatal(err)
+			}
+			for i, entry := range entries {
+				locales, found := entry["locales"]
+				if snapshot.Entries[i].DefinitionID != "portal" {
+					if found {
+						t.Fatalf("entry without localized copy includes locales: %s", locales)
+					}
+					continue
+				}
+				var got map[string]EntryLocale
+				if err := json.Unmarshal(locales, &got); err != nil || !reflect.DeepEqual(got, want[i].Locales) {
+					t.Fatalf("localized JSON = %s, %v; want %#v", locales, err, want[i].Locales)
+				}
 			}
 			mu.Lock()
 			defer mu.Unlock()
@@ -102,7 +123,10 @@ func TestCatalogSubjectCacheAndInvalidation(t *testing.T) {
 			writeList(w, []platformclient.AppInstallation{{DefinitionID: r.Header.Get("Authorization"), Phase: "Ready"}})
 			return
 		}
-		writeList(w, []platformclient.ApplicationStackDefinition{})
+		writeList(w, []platformclient.ApplicationStackDefinition{{
+			ID:      r.Header.Get("Authorization"),
+			Locales: map[string]platformclient.DefinitionLocale{"ja": {Title: "アプリ", Tagline: "説明"}},
+		}})
 	}))
 	defer server.Close()
 	catalog := NewCatalog(platformclient.New(server.URL, "pj-test"), "portal")
@@ -122,9 +146,15 @@ func TestCatalogSubjectCacheAndInvalidation(t *testing.T) {
 			snapshot.Project != (Project{ID: "pj-test", Name: tc.want}) || calls.Load() != tc.calls {
 			t.Fatalf("subject %s: snapshot = %#v, %v, calls = %d", tc.subject, snapshot, err, calls.Load())
 		}
+		if got := snapshot.Entries[0].Locales["ja"]; len(snapshot.Entries[0].Locales) != 1 || got != (EntryLocale{Title: "アプリ", Tagline: "説明"}) {
+			t.Fatalf("subject %s: localized copy = %#v", tc.subject, got)
+		}
 		// Both cache hits and misses must return caller-owned snapshots.
 		snapshot.Entries[0].DefinitionID = "caller mutation"
 		snapshot.Project.Name = "caller mutation"
+		snapshot.Entries[0].Locales["ja"] = EntryLocale{Title: "caller mutation"}
+		delete(snapshot.Entries[0].Locales, "ja")
+		snapshot.Entries[0].Locales["en"] = EntryLocale{Title: "caller addition"}
 	}
 	catalog.Invalidate("absent")
 	catalog.Invalidate("A")
