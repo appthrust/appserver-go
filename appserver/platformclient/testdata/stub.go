@@ -19,13 +19,15 @@ func main() {
 		var body any
 		switch r.URL.Path {
 		case "/api/v1/projects/pj-console-dev":
-			body = map[string]any{"id": "pj-console-dev", "teamSlug": "console-dev"}
-		case "/api/v1/teams":
-			body = map[string]any{"items": []any{map[string]string{"id": "team-dev", "slug": "console-dev", "role": "Admin"}}}
-		case "/api/v1/teams/team-dev/members":
-			body = map[string]any{"items": []any{map[string]string{"id": "dev-admin", "email": "admin@example.test", "name": "Demo Admin"}}}
-		case "/api/v1/teams/team-dev/directory-users":
-			body = map[string]any{"items": []any{map[string]string{"id": "dev-member", "email": "member@example.test", "name": "Demo Member"}}}
+			body = map[string]any{"id": "pj-console-dev", "name": "Console development"}
+		case "/api/v1/projects/pj-console-dev/access":
+			body = map[string]any{"projectId": "pj-console-dev", "member": true, "role": "Admin", "platformRoles": []string{}}
+		case "/api/v1/identity/search":
+			if strings.TrimSpace(r.URL.Query().Get("q")) == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			body = []any{map[string]string{"issuer": "dev", "subject": "dev-admin", "email": "admin@example.test", "displayName": "Demo Admin"}}
 		case "/api/v1/projects/pj-console-dev/source-connections":
 			body = map[string]any{"data": []any{map[string]string{"id": "github-dev", "status": "ready"}}}
 		case "/api/v1/registry-connections":

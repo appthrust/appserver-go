@@ -20,10 +20,8 @@ func TestWithHTTPClientTrustsPrivateCA(t *testing.T) {
 			t.Error("request bearer was not forwarded")
 		}
 		switch r.URL.Path {
-		case "/api/v1/projects/pj-test":
-			_, _ = w.Write([]byte(`{"teamSlug":"project-team"}`))
-		case "/api/v1/teams":
-			_, _ = w.Write([]byte(`{"items":[{"id":"team-id","slug":"project-team","role":"Admin"}]}`))
+		case "/api/v1/projects/pj-test/access":
+			_, _ = w.Write([]byte(`{"projectId":"pj-test","member":true,"role":"Admin","platformRoles":[]}`))
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -41,7 +39,7 @@ func TestWithHTTPClientTrustsPrivateCA(t *testing.T) {
 		t.Fatal("client must reuse only the supplied transport and retain a 10s timeout")
 	}
 	access, err := client.Access(t.Context(), "subject", "Bearer caller-token")
-	if err != nil || access.TeamID != "team-id" || !access.IsConsoleAdmin || !access.CanCreateApps {
+	if err != nil || access.Role != "Admin" || access.NotMember || !access.IsConsoleAdmin || !access.CanCreateApps {
 		t.Fatalf("trusted access: %+v %v", access, err)
 	}
 }
@@ -76,32 +74,29 @@ func TestRolesBearerCacheAndExpiry(t *testing.T) {
 	role.Store("Admin")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.Header.Get("Authorization") != "Bearer caller-token" {
-			t.Error("request bearer was not forwarded")
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/projects/pj-test/access" ||
+			r.Header.Get("Authorization") != "Bearer caller-token" || r.Header.Get("Accept") != "application/json" {
+			t.Errorf("unexpected access request: %s %s", r.Method, r.URL.Path)
 		}
-		switch r.URL.Path {
-		case "/api/v1/projects/pj-test":
-			_ = json.NewEncoder(w).Encode(map[string]string{"teamSlug": "project-team"})
-		case "/api/v1/teams":
-			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{
-				map[string]string{"id": "unrelated", "slug": "other-team", "role": "Admin"},
-				map[string]string{"id": "matching", "slug": "project-team", "role": role.Load().(string)},
-			}})
-		default:
-			t.Errorf("unexpected path %s", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"projectId": "pj-test", "member": true, "role": role.Load().(string), "platformRoles": []string{"PlatformAdmin"},
+		})
 	}))
 	defer server.Close()
 	client := New(server.URL, "pj-test")
+	start := time.Now()
 	for range 2 {
 		access, err := client.Access(context.Background(), "subject", "Bearer caller-token")
-		if err != nil || !access.IsConsoleAdmin || !access.CanCreateApps || access.TeamID != "matching" {
+		if err != nil || access.NotMember || !access.IsConsoleAdmin || !access.CanCreateApps || access.Role != "Admin" {
 			t.Fatalf("admin access: %+v %v", access, err)
 		}
 	}
-	if calls.Load() != 2 {
+	if calls.Load() != 1 {
 		t.Fatalf("60s subject cache missed: %d calls", calls.Load())
+	}
+	expires := client.cache["subject"].expires
+	if expires.Before(start.Add(60*time.Second)) || expires.After(time.Now().Add(60*time.Second)) {
+		t.Fatalf("member cache lifetime is not 60s: %s", expires)
 	}
 	for _, currentRole := range []string{"Editor", "Viewer"} {
 		role.Store(currentRole)
@@ -109,11 +104,11 @@ func TestRolesBearerCacheAndExpiry(t *testing.T) {
 		client.cache["subject"] = cachedAccess{expires: time.Now().Add(-time.Second)}
 		client.mu.Unlock()
 		access, err := client.Access(context.Background(), "subject", "Bearer caller-token")
-		if err != nil || access.IsConsoleAdmin || access.CanCreateApps != (currentRole == "Editor") {
+		if err != nil || access.NotMember || access.Role != currentRole || access.IsConsoleAdmin || access.CanCreateApps != (currentRole == "Editor") {
 			t.Fatalf("%s access: %+v %v", currentRole, access, err)
 		}
 	}
-	if calls.Load() != 6 {
+	if calls.Load() != 3 {
 		t.Fatalf("expired access was not refreshed: %d", calls.Load())
 	}
 }
@@ -146,16 +141,12 @@ func TestProjectDenialIsNotMembershipAndIsCached(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
 				switch r.URL.Path {
-				case "/api/v1/projects/pj-test":
+				case "/api/v1/projects/pj-test/access":
 					if current := int(projectStatus.Load()); current != http.StatusOK {
 						w.WriteHeader(current)
 						return
 					}
-					_ = json.NewEncoder(w).Encode(map[string]string{"teamSlug": "project-team"})
-				case "/api/v1/teams":
-					_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{
-						map[string]string{"id": "matching", "slug": "project-team", "role": "Editor"},
-					}})
+					_ = json.NewEncoder(w).Encode(map[string]any{"projectId": "pj-test", "member": true, "role": "Editor", "platformRoles": []string{}})
 				default:
 					t.Errorf("unexpected path %s", r.URL.Path)
 					w.WriteHeader(http.StatusNotFound)
@@ -166,12 +157,12 @@ func TestProjectDenialIsNotMembershipAndIsCached(t *testing.T) {
 			start := time.Now()
 			for range 2 {
 				access, err := client.Access(context.Background(), "subject", "Bearer token")
-				if err != nil || !access.NotMember || access.IsConsoleAdmin || access.CanCreateApps || access.TeamID != "" || access.TeamSlug != "" {
+				if err != nil || !access.NotMember || access.IsConsoleAdmin || access.CanCreateApps || access.Role != "" {
 					t.Fatalf("non-member access: %+v %v", access, err)
 				}
 			}
 			if calls.Load() != 1 {
-				t.Fatalf("denial was not cached or queried teams: %d calls", calls.Load())
+				t.Fatalf("denial was not cached: %d calls", calls.Load())
 			}
 			client.mu.Lock()
 			expires := client.cache["subject"].expires
@@ -184,16 +175,16 @@ func TestProjectDenialIsNotMembershipAndIsCached(t *testing.T) {
 			client.cache["subject"] = cachedAccess{expires: time.Now().Add(-time.Second)}
 			client.mu.Unlock()
 			access, err := client.Access(context.Background(), "subject", "Bearer token")
-			if err != nil || access.NotMember || !access.CanCreateApps || access.TeamSlug != "project-team" {
+			if err != nil || access.NotMember || !access.CanCreateApps || access.Role != "Editor" {
 				t.Fatalf("expired denial did not refresh membership: %+v %v", access, err)
 			}
-			if calls.Load() != 3 {
-				t.Fatalf("expired denial did not refresh Project and teams: %d", calls.Load())
+			if calls.Load() != 2 {
+				t.Fatalf("expired denial did not refresh Project access: %d", calls.Load())
 			}
 			projectStatus.Store(int32(status))
 			access, err = client.Access(context.Background(), "other-subject", "Bearer other-token")
-			if err != nil || !access.NotMember || access.TeamSlug != "project-team" {
-				t.Fatalf("non-member lost last known owning Team: %+v %v", access, err)
+			if err != nil || !access.NotMember || access.Role != "" {
+				t.Fatalf("another subject inherited membership: %+v %v", access, err)
 			}
 		})
 	}
@@ -211,10 +202,10 @@ func TestProjectServerFailureKeepsHTTPStatusAndIsNotCached(t *testing.T) {
 		access, err := client.Access(context.Background(), "subject", "Bearer token")
 		var responseError *HTTPError
 		if !errors.As(err, &responseError) || responseError.StatusCode != http.StatusInternalServerError ||
-			responseError.Path != "/api/v1/projects/pj-test" || access.NotMember {
+			responseError.Path != "/api/v1/projects/pj-test/access" || access.NotMember {
 			t.Fatalf("expected typed Project outage, got %+v %v", access, err)
 		}
-		if err.Error() != "platform /api/v1/projects/pj-test: HTTP 500" {
+		if err.Error() != "platform /api/v1/projects/pj-test/access: HTTP 500" {
 			t.Fatalf("unexpected HTTP error: %v", err)
 		}
 	}
@@ -223,63 +214,90 @@ func TestProjectServerFailureKeepsHTTPStatusAndIsNotCached(t *testing.T) {
 	}
 }
 
-func TestTeamsDenialRemainsAnError(t *testing.T) {
-	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound} {
-		t.Run(http.StatusText(status), func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/api/v1/projects/pj-test" {
-					_ = json.NewEncoder(w).Encode(map[string]string{"teamSlug": "project-team"})
-					return
-				}
-				w.WriteHeader(status)
-			}))
-			defer server.Close()
-			access, err := New(server.URL, "pj-test").Access(context.Background(), "subject", "Bearer token")
-			var responseError *HTTPError
-			if !errors.As(err, &responseError) || responseError.StatusCode != status ||
-				responseError.Path != "/api/v1/teams" || access.NotMember {
-				t.Fatalf("teams rejection must remain an error: %+v %v", access, err)
-			}
-		})
-	}
-}
-
-func TestCachedNonMemberUsesLatestOwningTeam(t *testing.T) {
+func TestMalformedAccessIsNotCached(t *testing.T) {
 	var calls atomic.Int32
-	var teamSlug atomic.Value
-	teamSlug.Store("first-team")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.Header.Get("Authorization") == "Bearer outsider" {
-			w.WriteHeader(http.StatusForbidden)
-			return
-		}
-		if r.URL.Path == "/api/v1/projects/pj-test" {
-			_ = json.NewEncoder(w).Encode(map[string]string{"teamSlug": teamSlug.Load().(string)})
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{
-			map[string]string{"id": "team-id", "slug": teamSlug.Load().(string), "role": "Viewer"},
-		}})
+		_, _ = w.Write([]byte(`{"member":true,"role":`))
 	}))
 	defer server.Close()
 	client := New(server.URL, "pj-test")
-	access, err := client.Access(context.Background(), "outsider", "Bearer outsider")
-	if err != nil || !access.NotMember || access.TeamSlug != "" {
-		t.Fatalf("unknown owning Team: %+v %v", access, err)
-	}
-	for _, slug := range []string{"first-team", "renamed-team"} {
-		teamSlug.Store(slug)
-		if _, err := client.Access(context.Background(), slug, "Bearer member"); err != nil {
-			t.Fatal(err)
-		}
-		access, err := client.Access(context.Background(), "outsider", "Bearer outsider")
-		if err != nil || !access.NotMember || access.TeamSlug != slug {
-			t.Fatalf("cached non-member did not receive latest owning Team %q: %+v %v", slug, access, err)
+	for range 2 {
+		access, err := client.Access(t.Context(), "subject", "Bearer token")
+		if err == nil || access != (ProjectAccess{}) {
+			t.Fatalf("malformed access granted membership: %+v %v", access, err)
 		}
 	}
-	if calls.Load() != 5 {
-		t.Fatalf("cached non-member performed another upstream read: %d", calls.Load())
+	if calls.Load() != 2 {
+		t.Fatalf("malformed response cached: %d calls", calls.Load())
+	}
+}
+
+func TestNonMemberResponseIsCachedPerSubject(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.Path != "/api/v1/projects/pj-test/access" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") == "Bearer outsider" {
+			_, _ = w.Write([]byte(`{"projectId":"pj-test","member":false,"role":null,"platformRoles":["PlatformAdmin"]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"projectId":"pj-test","member":true,"role":"Viewer","platformRoles":[]}`))
+	}))
+	defer server.Close()
+	client := New(server.URL, "pj-test")
+	for range 2 {
+		access, err := client.Access(t.Context(), "outsider", "Bearer outsider")
+		if err != nil || access != (ProjectAccess{NotMember: true}) {
+			t.Fatalf("non-member access: %+v %v", access, err)
+		}
+	}
+	access, err := client.Access(t.Context(), "member", "Bearer member")
+	if err != nil || access != (ProjectAccess{Role: "Viewer"}) {
+		t.Fatalf("member access: %+v %v", access, err)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("cache did not isolate subjects: %d calls", calls.Load())
+	}
+}
+
+func TestIdentitySearch(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.Path != "/api/v1/identity/search" || r.URL.Query().Get("q") != "name+tag@example.test" ||
+			r.Header.Get("Authorization") != "Bearer caller" {
+			t.Errorf("unexpected identity search request: %s", r.URL)
+		}
+		_, _ = w.Write([]byte(`[{"issuer":"issuer","subject":"subject","email":"name+tag@example.test","displayName":"Person","avatarUrl":"https://example.test/avatar"}]`))
+	}))
+	defer server.Close()
+	client := New(server.URL, "pj-test")
+	people, err := client.IdentitySearch(t.Context(), "Bearer caller", " name+tag@example.test ")
+	want := []DirectoryPerson{{ID: "subject", Email: "name+tag@example.test", DisplayName: "Person"}}
+	if err != nil || !reflect.DeepEqual(people, want) {
+		t.Fatalf("identity search: %+v %v", people, err)
+	}
+	if _, err := client.IdentitySearch(t.Context(), "Bearer caller", " "); err == nil || err.Error() != "identity search query is required" {
+		t.Fatalf("empty query must fail before requesting identities: %v", err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("unexpected identity requests: %d", calls.Load())
+	}
+}
+
+func TestIdentitySearchPreservesForbidden(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+	people, err := New(server.URL, "pj-test").IdentitySearch(t.Context(), "Bearer caller", "person")
+	var responseError *HTTPError
+	if people != nil || !errors.As(err, &responseError) || responseError.StatusCode != http.StatusForbidden ||
+		responseError.Path != "/api/v1/identity/search?q=person" {
+		t.Fatalf("identity search lost permission error: %+v %v", people, err)
 	}
 }
 
@@ -292,7 +310,7 @@ func TestProjectReadModel(t *testing.T) {
 			r.Header.Get("Accept") != "application/json" || r.Header.Get("Cookie") != "" {
 			t.Errorf("unexpected Project request: %s %s %v", r.Method, r.URL.Path, r.Header)
 		}
-		_, _ = w.Write([]byte(`{"id":"pj-test","name":"開発チーム","teamSlug":"project-team","status":"Ready"}`))
+		_, _ = w.Write([]byte(`{"id":"pj-test","name":"開発チーム","status":"Ready"}`))
 	}))
 	defer server.Close()
 	client := New(server.URL, "pj-test")
