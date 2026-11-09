@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -19,10 +18,9 @@ type Roles struct {
 	CanCreateApps  bool `json:"canCreateApps"`
 }
 
-type TeamAccess struct {
+type ProjectAccess struct {
 	Roles
-	TeamID    string
-	TeamSlug  string
+	Role      string
 	NotMember bool
 }
 
@@ -36,7 +34,7 @@ func (e *HTTPError) Error() string {
 }
 
 type cachedAccess struct {
-	access  TeamAccess
+	access  ProjectAccess
 	expires time.Time
 }
 
@@ -46,7 +44,6 @@ type Client struct {
 	http      *http.Client
 	mu        sync.Mutex
 	cache     map[string]cachedAccess
-	teamSlug  string
 }
 
 // Option configures a Platform API client.
@@ -105,56 +102,40 @@ func (c *Client) Project(ctx context.Context, bearer string) (Project, error) {
 	return project, nil
 }
 
-func (c *Client) Access(ctx context.Context, subject, bearer string) (TeamAccess, error) {
+func (c *Client) Access(ctx context.Context, subject, bearer string) (ProjectAccess, error) {
 	c.mu.Lock()
 	entry, found := c.cache[subject]
-	teamSlug := c.teamSlug
 	c.mu.Unlock()
 	if found && time.Now().Before(entry.expires) {
-		if entry.access.NotMember {
-			entry.access.TeamSlug = teamSlug
-		}
 		return entry.access, nil
 	}
 	var project struct {
-		TeamSlug string `json:"teamSlug"`
+		Member bool   `json:"member"`
+		Role   string `json:"role"`
 	}
-	if err := c.get(ctx, bearer, "/api/v1/projects/"+url.PathEscape(c.ProjectID), &project); err != nil {
+	if err := c.get(ctx, bearer, "/api/v1/projects/"+url.PathEscape(c.ProjectID)+"/access", &project); err != nil {
 		var responseError *HTTPError
 		if !errors.As(err, &responseError) ||
 			(responseError.StatusCode != http.StatusUnauthorized && responseError.StatusCode != http.StatusForbidden && responseError.StatusCode != http.StatusNotFound) {
-			return TeamAccess{}, err
+			return ProjectAccess{}, err
 		}
-		access := TeamAccess{TeamSlug: teamSlug, NotMember: true}
+		access := ProjectAccess{NotMember: true}
 		c.cacheAccess(subject, access)
 		return access, nil
 	}
-	c.mu.Lock()
-	c.teamSlug = project.TeamSlug
-	c.mu.Unlock()
-	var teams struct {
-		Items []struct{ ID, Slug, Role string } `json:"items"`
-	}
-	if err := c.get(ctx, bearer, "/api/v1/teams", &teams); err != nil {
-		return TeamAccess{}, err
-	}
-	if teams.Items == nil {
-		return TeamAccess{}, fmt.Errorf("platform teams response has no items")
-	}
-	access := TeamAccess{TeamSlug: project.TeamSlug}
-	for _, team := range teams.Items {
-		if team.Slug == project.TeamSlug && project.TeamSlug != "" {
-			access.TeamID = team.ID
-			access.IsConsoleAdmin = team.Role == "Admin"
-			access.CanCreateApps = access.IsConsoleAdmin || team.Role == "Editor"
-			break
-		}
+	access := ProjectAccess{
+		Roles: Roles{
+			IsConsoleAdmin: project.Role == "Admin",
+			CanCreateApps:  project.Role == "Admin" || project.Role == "Editor",
+		},
+		Role:      project.Role,
+		NotMember: !project.Member,
 	}
 	c.cacheAccess(subject, access)
 	return access, nil
 }
 
-func (c *Client) cacheAccess(subject string, access TeamAccess) {
+func (c *Client) cacheAccess(subject string, access ProjectAccess) {
 	c.mu.Lock()
 	now := time.Now()
 	for key, cached := range c.cache {
@@ -172,32 +153,24 @@ type DirectoryPerson struct {
 	DisplayName string `json:"displayName"`
 }
 
-func (c *Client) Directory(ctx context.Context, bearer string, access TeamAccess, query string) ([]DirectoryPerson, error) {
-	result := []DirectoryPerson{}
-	if access.TeamID == "" {
-		return result, nil
+// IdentitySearch finds principals the bearer is permitted to discover.
+func (c *Client) IdentitySearch(ctx context.Context, bearer, query string) ([]DirectoryPerson, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("identity search query is required")
 	}
-	known := map[string]bool{}
-	for _, suffix := range []string{"/members", "/directory-users"} {
-		var response struct {
-			Items []struct{ ID, Email, Name string } `json:"items"`
-		}
-		if err := c.get(ctx, bearer, "/api/v1/teams/"+url.PathEscape(access.TeamID)+suffix, &response); err != nil {
-			return nil, err
-		}
-		if response.Items == nil {
-			return nil, fmt.Errorf("platform directory response has no items")
-		}
-		for _, person := range response.Items {
-			email := strings.ToLower(strings.TrimSpace(person.Email))
-			if email == "" || known[email] || !strings.Contains(strings.ToLower(email+" "+person.Name), strings.ToLower(query)) {
-				continue
-			}
-			known[email] = true
-			result = append(result, DirectoryPerson{ID: person.ID, Email: email, DisplayName: person.Name})
-		}
+	var response []struct {
+		Subject     string `json:"subject"`
+		Email       string `json:"email"`
+		DisplayName string `json:"displayName"`
 	}
-	slices.SortFunc(result, func(a, b DirectoryPerson) int { return strings.Compare(a.Email, b.Email) })
+	if err := c.get(ctx, bearer, "/api/v1/identity/search?q="+url.QueryEscape(query), &response); err != nil {
+		return nil, err
+	}
+	result := make([]DirectoryPerson, len(response))
+	for i, person := range response {
+		result[i] = DirectoryPerson{ID: person.Subject, Email: person.Email, DisplayName: person.DisplayName}
+	}
 	return result, nil
 }
 
@@ -208,17 +181,13 @@ type Connection struct {
 
 type Settings struct {
 	ProjectID         string     `json:"projectId"`
-	TeamSlug          *string    `json:"teamSlug"`
 	GitHub            Connection `json:"github"`
 	Registry          Connection `json:"registry"`
 	DefaultTemplateID string     `json:"defaultTemplateId"`
 }
 
-func (c *Client) Settings(ctx context.Context, bearer string, access TeamAccess) (Settings, error) {
+func (c *Client) Settings(ctx context.Context, bearer string) (Settings, error) {
 	settings := Settings{ProjectID: c.ProjectID, DefaultTemplateID: "nextjs-postgres"}
-	if access.TeamSlug != "" {
-		settings.TeamSlug = &access.TeamSlug
-	}
 	for _, item := range []struct {
 		path   string
 		target *Connection
