@@ -395,7 +395,7 @@ func TestAppInstallationReadModels(t *testing.T) {
 		}
 		definitions, err := client.ApplicationStackDefinitions(context.Background(), "bearer caller-token")
 		wantDefinitions := []ApplicationStackDefinition{{
-			ID: "directory", Title: "Directory", Description: "People and groups",
+			ID: "directory", Title: "Directory", Description: "People and groups", Category: "productivity",
 			Locales: map[string]DefinitionLocale{"ja": {Title: "ディレクトリ", Tagline: "人とグループ"}},
 		}}
 		if err != nil || !reflect.DeepEqual(definitions, wantDefinitions) {

@@ -27,6 +27,9 @@ type Entry struct {
 	Phase        string                 `json:"phase"`
 	Current      bool                   `json:"current"`
 	Locales      map[string]EntryLocale `json:"locales,omitempty"`
+	// Category is the catalog's category id for the app's definition (for
+	// example "collaborate"); empty when the catalog does not carry one.
+	Category string `json:"category,omitempty"`
 }
 
 // EntryLocale contains localized launcher display copy.
@@ -120,7 +123,7 @@ func (c *Catalog) Load(ctx context.Context, subject, bearer string) (Snapshot, e
 			DefinitionID: installation.DefinitionID, Name: display.Name, Description: display.Description,
 			Icon: display.Icon, URL: installation.URL, Phase: installation.Phase,
 			Current: installation.DefinitionID == c.self,
-			Locales: locales,
+			Locales: locales, Category: definition.Category,
 		})
 	}
 	slices.SortFunc(entries, func(a, b Entry) int {
