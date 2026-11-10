@@ -21,7 +21,7 @@ func main() {
 		case "/api/v1/projects/pj-console-dev":
 			body = map[string]any{"id": "pj-console-dev", "name": "Console development"}
 		case "/api/v1/projects/pj-console-dev/access":
-			body = map[string]any{"projectId": "pj-console-dev", "member": true, "role": "Admin", "platformRoles": []string{}}
+			body = map[string]any{"projectId": "pj-console-dev", "member": true, "roles": []string{"Admin"}, "actions": []string{}, "platformRoles": []string{}}
 		case "/api/v1/identity/search":
 			if strings.TrimSpace(r.URL.Query().Get("q")) == "" {
 				w.WriteHeader(http.StatusBadRequest)

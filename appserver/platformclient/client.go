@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,9 +19,11 @@ type Roles struct {
 	CanCreateApps  bool `json:"canCreateApps"`
 }
 
+// ProjectAccess is the caller's standing in the app's Project, derived from
+// the Project roles the Platform reports (built-in Admin and Editor). Custom
+// roles grant neither flag.
 type ProjectAccess struct {
 	Roles
-	Role      string
 	NotMember bool
 }
 
@@ -110,8 +113,8 @@ func (c *Client) Access(ctx context.Context, subject, bearer string) (ProjectAcc
 		return entry.access, nil
 	}
 	var project struct {
-		Member bool   `json:"member"`
-		Role   string `json:"role"`
+		Member bool     `json:"member"`
+		Roles  []string `json:"roles"`
 	}
 	if err := c.get(ctx, bearer, "/api/v1/projects/"+url.PathEscape(c.ProjectID)+"/access", &project); err != nil {
 		var responseError *HTTPError
@@ -123,12 +126,12 @@ func (c *Client) Access(ctx context.Context, subject, bearer string) (ProjectAcc
 		c.cacheAccess(subject, access)
 		return access, nil
 	}
+	admin := slices.Contains(project.Roles, "Admin")
 	access := ProjectAccess{
 		Roles: Roles{
-			IsConsoleAdmin: project.Role == "Admin",
-			CanCreateApps:  project.Role == "Admin" || project.Role == "Editor",
+			IsConsoleAdmin: admin,
+			CanCreateApps:  admin || slices.Contains(project.Roles, "Editor"),
 		},
-		Role:      project.Role,
 		NotMember: !project.Member,
 	}
 	c.cacheAccess(subject, access)
