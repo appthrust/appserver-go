@@ -20,11 +20,28 @@ type Roles struct {
 }
 
 // ProjectAccess is the caller's standing in the app's Project, derived from
-// the Project roles the Platform reports (built-in Admin and Editor). Custom
-// roles grant neither flag.
+// the Project roles the Platform reports. The built-in Admin and Editor grant
+// the flags; custom roles grant neither.
+//
+// Role is the caller's primary role for display and coarse gating: the
+// strongest built-in role held (Admin, Editor, Viewer), otherwise the first
+// role reported. It is empty only when the caller holds no role.
 type ProjectAccess struct {
 	Roles
+	Role      string
 	NotMember bool
+}
+
+func primaryRole(roles []string) string {
+	for _, builtin := range []string{"Admin", "Editor", "Viewer"} {
+		if slices.Contains(roles, builtin) {
+			return builtin
+		}
+	}
+	if len(roles) != 0 {
+		return roles[0]
+	}
+	return ""
 }
 
 type HTTPError struct {
@@ -132,6 +149,7 @@ func (c *Client) Access(ctx context.Context, subject, bearer string) (ProjectAcc
 			IsConsoleAdmin: admin,
 			CanCreateApps:  admin || slices.Contains(project.Roles, "Editor"),
 		},
+		Role:      primaryRole(project.Roles),
 		NotMember: !project.Member,
 	}
 	c.cacheAccess(subject, access)

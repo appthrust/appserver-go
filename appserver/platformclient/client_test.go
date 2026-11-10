@@ -87,7 +87,7 @@ func TestRolesBearerCacheAndExpiry(t *testing.T) {
 	start := time.Now()
 	for range 2 {
 		access, err := client.Access(context.Background(), "subject", "Bearer caller-token")
-		if err != nil || access.NotMember || !access.IsConsoleAdmin || !access.CanCreateApps {
+		if err != nil || access.NotMember || !access.IsConsoleAdmin || !access.CanCreateApps || access.Role != "Admin" {
 			t.Fatalf("admin access: %+v %v", access, err)
 		}
 	}
@@ -101,23 +101,25 @@ func TestRolesBearerCacheAndExpiry(t *testing.T) {
 	for _, tc := range []struct {
 		roles  []string
 		create bool
+		role   string
 	}{
-		{[]string{"Editor"}, true},
-		{[]string{"Viewer"}, false},
-		{[]string{"custom-operator", "Editor"}, true},
-		{[]string{"custom-operator"}, false},
-		{[]string{}, false},
+		{[]string{"Editor"}, true, "Editor"},
+		{[]string{"Viewer"}, false, "Viewer"},
+		{[]string{"custom-operator", "Editor"}, true, "Editor"},
+		{[]string{"Viewer", "custom-operator"}, false, "Viewer"},
+		{[]string{"custom-operator", "custom-auditor"}, false, "custom-operator"},
+		{[]string{}, false, ""},
 	} {
 		roles.Store(tc.roles)
 		client.mu.Lock()
 		client.cache["subject"] = cachedAccess{expires: time.Now().Add(-time.Second)}
 		client.mu.Unlock()
 		access, err := client.Access(context.Background(), "subject", "Bearer caller-token")
-		if err != nil || access.NotMember || access.IsConsoleAdmin || access.CanCreateApps != tc.create {
+		if err != nil || access.NotMember || access.IsConsoleAdmin || access.CanCreateApps != tc.create || access.Role != tc.role {
 			t.Fatalf("%v access: %+v %v", tc.roles, access, err)
 		}
 	}
-	if calls.Load() != 6 {
+	if calls.Load() != 7 {
 		t.Fatalf("expired access was not refreshed: %d", calls.Load())
 	}
 }
@@ -264,7 +266,7 @@ func TestNonMemberResponseIsCachedPerSubject(t *testing.T) {
 		}
 	}
 	access, err := client.Access(t.Context(), "member", "Bearer member")
-	if err != nil || access != (ProjectAccess{}) {
+	if err != nil || access != (ProjectAccess{Role: "Viewer"}) {
 		t.Fatalf("member access: %+v %v", access, err)
 	}
 	if calls.Load() != 2 {
