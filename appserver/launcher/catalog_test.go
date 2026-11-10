@@ -42,7 +42,7 @@ func TestCatalogJoinCurrentAndSort(t *testing.T) {
 		{ID: "portal", Title: "Catalog Home", Description: "The installation display takes precedence", Locales: map[string]platformclient.DefinitionLocale{"ja": {Title: "ホーム", Tagline: "インストール済みのアプリ"}}},
 		{ID: "tool-builder", Title: "Shared", Description: "Tools"},
 		{ID: "knowledge", Title: "Shared", Description: "Knowledge"},
-		{ID: "directory", Title: "Directory", Description: "People"},
+		{ID: "directory", Title: "Directory", Description: "People", Category: "collaborate"},
 		{ID: "not-installed", Title: "Not installed"},
 	}
 	for _, self := range []string{"portal", "directory", "not-installed"} {
@@ -72,7 +72,7 @@ func TestCatalogJoinCurrentAndSort(t *testing.T) {
 			catalog := NewCatalog(platformclient.New(server.URL, "pj-test"), self)
 			snapshot, err := catalog.Load(context.Background(), "viewer", "bearer viewer")
 			want := []Entry{
-				{DefinitionID: "directory", Name: "Directory", Description: "People", Icon: "directory", URL: "https://custom.example/people", Phase: "Degraded", Current: self == "directory"},
+				{DefinitionID: "directory", Name: "Directory", Description: "People", Icon: "directory", URL: "https://custom.example/people", Phase: "Degraded", Current: self == "directory", Category: "collaborate"},
 				{DefinitionID: "portal", Name: "Home", Description: "Every installed app", Icon: "layout-dashboard", URL: "https://custom.example/home", Phase: "Ready", Current: self == "portal", Locales: map[string]EntryLocale{"ja": {Title: "ホーム", Tagline: "インストール済みのアプリ"}}},
 				{DefinitionID: "knowledge", Name: "Shared", Description: "Knowledge", Icon: "book", URL: "https://custom.example/knowledge", Phase: "Pending"},
 				{DefinitionID: "tool-builder", Name: "Shared", Description: "Tools", Icon: "wrench", URL: "https://custom.example/tools", Phase: "UpdateAvailable"},
