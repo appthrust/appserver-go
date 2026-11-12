@@ -12,6 +12,8 @@ type Error struct {
 	Status  int    `json:"-"`
 	Code    string `json:"error"`
 	Message string `json:"message"`
+	// RetryAfter is an optional HTTP Retry-After hint, not part of the envelope.
+	RetryAfter string `json:"-"`
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
@@ -33,6 +35,9 @@ func WriteError(w http.ResponseWriter, err error, service string) {
 	if !errors.As(err, &apiError) {
 		log.Printf("%s request failed: %v", service, err)
 		apiError = &Error{Status: 500, Code: "internal_error", Message: "The " + service + " could not complete this request"}
+	}
+	if apiError.RetryAfter != "" {
+		w.Header().Set("Retry-After", apiError.RetryAfter)
 	}
 	WriteJSON(w, apiError.Status, apiError)
 }

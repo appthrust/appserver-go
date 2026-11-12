@@ -26,13 +26,7 @@ func NewHandler(catalog *Catalog, authenticate AuthenticateFunc) http.Handler {
 		}
 		claims, bearer, err := authenticate(r.Context(), header)
 		if err != nil {
-			if errors.Is(err, identity.ErrUnavailable) {
-				httpx.WriteError(w, httpx.Fail(http.StatusServiceUnavailable, "identity_unavailable", "Identity verification is unavailable"), "launcher")
-			} else if errors.Is(err, identity.ErrRawKeyNotAccepted) {
-				httpx.WriteError(w, httpx.Fail(http.StatusUnauthorized, "raw_key_not_accepted", "Exchange the access key for an assertion before calling this API"), "launcher")
-			} else {
-				httpx.WriteError(w, httpx.Fail(http.StatusUnauthorized, "unauthenticated", "A valid bearer token is required"), "launcher")
-			}
+			identity.WriteError(w, err)
 			return
 		}
 		if claims.Principal.Kind == "key" {

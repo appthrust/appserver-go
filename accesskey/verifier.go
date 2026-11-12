@@ -35,20 +35,49 @@ func NewVerifier(issuer string, src JWKSSource) *Verifier {
 // An unknown kid triggers one additional source lookup; HTTP sources rate-limit
 // that forced refresh independently of their normal cache TTL.
 func (v *Verifier) Verify(ctx context.Context, raw, audience string) (Claims, error) {
+	payload, err := v.verifyPayload(ctx, raw)
+	if err != nil {
+		return Claims{}, err
+	}
+	var credential struct {
+		Kind string `json:"appthrust.io/credential"`
+	}
+	if json.Unmarshal(payload, &credential) != nil || credential.Kind == "session" {
+		return Claims{}, fmt.Errorf("%w: session assertions are internal", ErrInvalidAssertion)
+	}
+	var claims Claims
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return Claims{}, fmt.Errorf("%w: claims", ErrInvalidAssertion)
+	}
+	if claims.Issuer == "" || claims.Issuer != v.issuer {
+		return Claims{}, fmt.Errorf("%w: issuer", ErrInvalidAssertion)
+	}
+	if audience == "" || claims.Audience != audience {
+		return Claims{}, fmt.Errorf("%w: audience", ErrInvalidAssertion)
+	}
+	if !v.now().Before(claims.ExpiresAt.Add(assertionLeeway)) {
+		return Claims{}, ErrExpiredAssertion
+	}
+	return claims, nil
+}
+
+// verifyPayload shares signature, algorithm, protected-header and JWKS checks
+// between network key assertions and SDK-internal session assertions.
+func (v *Verifier) verifyPayload(ctx context.Context, raw string) ([]byte, error) {
 	token, err := jose.ParseSignedCompact(raw, []jose.SignatureAlgorithm{jose.ES256})
 	if err != nil || len(token.Signatures) != 1 {
-		return Claims{}, fmt.Errorf("%w: encoding or algorithm", ErrInvalidAssertion)
+		return nil, fmt.Errorf("%w: encoding or algorithm", ErrInvalidAssertion)
 	}
 	header := token.Signatures[0].Protected
 	if header.ExtraHeaders[jose.HeaderType] != AssertionType || header.KeyID == "" {
-		return Claims{}, fmt.Errorf("%w: typ or kid", ErrInvalidAssertion)
+		return nil, fmt.Errorf("%w: typ or kid", ErrInvalidAssertion)
 	}
 	if v.src == nil {
-		return Claims{}, fmt.Errorf("%w: missing JWKS source", ErrInvalidAssertion)
+		return nil, fmt.Errorf("%w: missing JWKS source", ErrInvalidAssertion)
 	}
 	set, err := v.src.Keys(ctx)
 	if err != nil {
-		return Claims{}, fmt.Errorf("%w: JWKS: %w", ErrInvalidAssertion, err)
+		return nil, fmt.Errorf("%w: JWKS: %w", ErrInvalidAssertion, err)
 	}
 	if !hasKeyID(set, header.KeyID) {
 		if source, ok := v.src.(interface {
@@ -59,7 +88,7 @@ func (v *Verifier) Verify(ctx context.Context, raw, audience string) (Claims, er
 			set, err = v.src.Keys(ctx)
 		}
 		if err != nil {
-			return Claims{}, fmt.Errorf("%w: JWKS refresh: %w", ErrInvalidAssertion, err)
+			return nil, fmt.Errorf("%w: JWKS refresh: %w", ErrInvalidAssertion, err)
 		}
 	}
 	for _, key := range set.Keys {
@@ -74,22 +103,9 @@ func (v *Verifier) Verify(ctx context.Context, raw, audience string) (Claims, er
 		if err != nil {
 			continue
 		}
-		var claims Claims
-		if err := json.Unmarshal(payload, &claims); err != nil {
-			return Claims{}, fmt.Errorf("%w: claims", ErrInvalidAssertion)
-		}
-		if claims.Issuer == "" || claims.Issuer != v.issuer {
-			return Claims{}, fmt.Errorf("%w: issuer", ErrInvalidAssertion)
-		}
-		if audience == "" || claims.Audience != audience {
-			return Claims{}, fmt.Errorf("%w: audience", ErrInvalidAssertion)
-		}
-		if !v.now().Before(claims.ExpiresAt.Add(assertionLeeway)) {
-			return Claims{}, ErrExpiredAssertion
-		}
-		return claims, nil
+		return payload, nil
 	}
-	return Claims{}, fmt.Errorf("%w: unknown kid or signature", ErrInvalidAssertion)
+	return nil, fmt.Errorf("%w: unknown kid or signature", ErrInvalidAssertion)
 }
 
 func hasKeyID(set jose.JSONWebKeySet, kid string) bool {

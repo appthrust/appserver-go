@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/appthrust/appserver-go/accesskey"
+	"github.com/appthrust/appserver-go/appserver/httpx"
 	"github.com/appthrust/appserver-go/appserver/identity"
 	"github.com/appthrust/appserver-go/appserver/platformclient"
 )
@@ -64,6 +65,8 @@ func TestHandlerAuthenticationFailures(t *testing.T) {
 		{"invalid bearer", errors.New("invalid token"), http.StatusUnauthorized, "unauthenticated"},
 		{"identity unavailable", identity.ErrUnavailable, http.StatusServiceUnavailable, "identity_unavailable"},
 		{"wrapped identity unavailable", fmt.Errorf("discovery: %w", identity.ErrUnavailable), http.StatusServiceUnavailable, "identity_unavailable"},
+		{"access unavailable", httpx.Fail(503, "access_unavailable", "App access verification is unavailable"), http.StatusServiceUnavailable, "access_unavailable"},
+		{"app access denied", httpx.Forbidden(), http.StatusForbidden, "forbidden"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			authenticate := func(_ context.Context, header string) (identity.Identity, string, error) {
