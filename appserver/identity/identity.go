@@ -26,6 +26,7 @@ type Identity struct {
 	Principal accesskey.Principal
 	Email     string
 	Name      string
+	Access    *AppAccess
 }
 
 type Trust struct {
@@ -34,6 +35,8 @@ type Trust struct {
 	OIDCAudiences  []string
 	AccessIssuer   string
 	AccessAudience string
+	// AppAccess enables user-permission exchange; nil preserves legacy behavior.
+	AppAccess *AppAccessConfig
 }
 
 // FromEnv reads platform connection trust and audience configuration for a built-in app.
@@ -50,6 +53,8 @@ func FromEnv(prefix string) Trust {
 
 type userClaims struct {
 	Subject           string   `json:"sub"`
+	Issuer            string   `json:"iss"`
+	AuthorizedParty   string   `json:"azp"`
 	Email             string   `json:"email"`
 	Name              string   `json:"name"`
 	PreferredUsername string   `json:"preferred_username"`
@@ -71,6 +76,7 @@ type Authenticator struct {
 	mu        sync.Mutex
 	verifiers []*oidc.IDTokenVerifier
 	access    *accesskey.Verifier
+	appAccess *appAccessClient
 	// inflight is non-nil while one caller runs discovery; it is closed when
 	// that attempt ends so concurrent callers wait for its result instead of
 	// failing. Discovery is driven by the first authenticated request to a
@@ -104,8 +110,21 @@ func New(trust Trust) (*Authenticator, error) {
 		return nil, errors.New("OIDC and access issuers must be distinct")
 	}
 	a := &Authenticator{trust: trust, http: client}
-	if trust.AccessIssuer != "" && trust.AccessAudience != "" {
-		a.access = accesskey.NewVerifier(trust.AccessIssuer, accesskey.NewHTTPJWKSSource(accesskey.JWKSURL(trust.AccessIssuer), client, 5*time.Minute))
+	var assertions *accesskey.Verifier
+	if trust.AppAccess != nil && (trust.OIDCIssuer == "" || trust.AccessIssuer == "") {
+		return nil, errors.New("OIDC and access issuers are required for app access")
+	}
+	if trust.AccessIssuer != "" && (trust.AccessAudience != "" || trust.AppAccess != nil) {
+		assertions = accesskey.NewVerifier(trust.AccessIssuer, accesskey.NewHTTPJWKSSource(accesskey.JWKSURL(trust.AccessIssuer), client, 5*time.Minute))
+	}
+	if trust.AccessAudience != "" {
+		a.access = assertions
+	}
+	if trust.AppAccess != nil {
+		a.appAccess, err = newAppAccessClient(*trust.AppAccess, client, assertions)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if trust.OIDCIssuer == "" {
 		log.Print("WARNING: OIDC issuer is unset; bearer claims are UNVERIFIED (local development only)")
@@ -200,11 +219,16 @@ func (a *Authenticator) Authenticate(ctx context.Context, header string) (Identi
 	}
 	body, err := base64.RawURLEncoding.DecodeString(parts[1])
 	var routing struct {
-		Issuer   string          `json:"iss"`
-		Audience json.RawMessage `json:"aud"`
+		Issuer     string          `json:"iss"`
+		Audience   json.RawMessage `json:"aud"`
+		Credential string          `json:"appthrust.io/credential"`
 	}
 	if err != nil || json.Unmarshal(body, &routing) != nil {
 		return Identity{}, "", errors.New("invalid JWT claims")
+	}
+	// Even in local-development mode, SDK-internal assertions are never network credentials.
+	if routing.Credential == "session" {
+		return Identity{}, "", errors.New("session assertions are not accepted as bearer tokens")
 	}
 	// Unverified issuer and audience select trust, never establish identity.
 	if a.trust.AccessIssuer != "" && routing.Issuer == a.trust.AccessIssuer {
@@ -259,6 +283,7 @@ func (a *Authenticator) Authenticate(ctx context.Context, header string) (Identi
 	} else if err := json.Unmarshal(body, &claims); err != nil {
 		return Identity{}, "", errors.New("invalid JWT claims")
 	}
+	bearerSubject := claims.Subject
 	claims.Subject = strings.TrimSpace(claims.Subject)
 	claims.Email = strings.ToLower(strings.TrimSpace(claims.Email))
 	address, err := mail.ParseAddress(claims.Email)
@@ -276,10 +301,25 @@ func (a *Authenticator) Authenticate(ctx context.Context, header string) (Identi
 	if claims.Name == "" {
 		claims.Name = claims.Email
 	}
-	return Identity{
+	result := Identity{
 		Principal: accesskey.Principal{Kind: "user", Subject: claims.Subject, Groups: claims.Groups},
 		Email:     claims.Email, Name: claims.Name,
-	}, "Bearer " + raw, nil
+	}
+	if a.appAccess != nil {
+		access, err := a.appAccess.resolve(ctx, appAccessKey{issuer: claims.Issuer, subject: bearerSubject, audience: claims.AuthorizedParty}, "Bearer "+raw)
+		if err != nil {
+			return Identity{}, "", err
+		}
+		result.Principal.Scopes = access.scopes
+		result.Principal.Project = a.appAccess.config.Project
+		result.Access = &access.access
+		if a.appAccess.config.RequirePermissions {
+			if err := checkAppAccess(result); err != nil {
+				return Identity{}, "", err
+			}
+		}
+	}
+	return result, "Bearer " + raw, nil
 }
 
 // httpClient bounds discovery and remote key retrieval, including key rotation.

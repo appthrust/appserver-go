@@ -48,6 +48,8 @@ func TestEntriesHandlerAuthenticationFailures(t *testing.T) {
 		{"wrapped identity unavailable", fmt.Errorf("discovery: %w", identity.ErrUnavailable), "", http.StatusServiceUnavailable, "identity_unavailable"},
 		{"raw access key", identity.ErrRawKeyNotAccepted, "", http.StatusUnauthorized, "raw_key_not_accepted"},
 		{"wrapped raw access key", fmt.Errorf("bearer: %w", identity.ErrRawKeyNotAccepted), "", http.StatusUnauthorized, "raw_key_not_accepted"},
+		{"access unavailable", httpx.Fail(503, "access_unavailable", "App access verification is unavailable"), "", http.StatusServiceUnavailable, "access_unavailable"},
+		{"app access denied", httpx.Forbidden(), "", http.StatusForbidden, "forbidden"},
 		{"access assertion", nil, "key", http.StatusForbidden, "key_not_permitted"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
