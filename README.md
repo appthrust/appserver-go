@@ -20,17 +20,38 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) and the accepted
 ## App permissions (ADR-0082)
 
 App access is opt-in and requires a platform implementing
-`POST /api/v1/access/user-token` (see the pending minimum version in
+`POST /api/v1/access/user-token` (see
 [COMPATIBILITY.md](COMPATIBILITY.md)). Existing authenticators and Project-role
 APIs remain unchanged when `Trust.AppAccess` is nil.
 
+### Language-neutral contract
+
+1. Add a platform connection to the component. It supplies `PLATFORM_API_URL`,
+   `PLATFORM_PROJECT_ID`, `PLATFORM_OIDC_ISSUER`, and `PLATFORM_ACCESS_ISSUER`.
+2. Verify the forwarded user token, then
+   `POST {PLATFORM_API_URL}/api/v1/access/user-token` with its forwarded
+   `Authorization` header and no body. Cache per subject (isolated by issuer
+   and client) until shortly before `expiresAt`; Assertions last 60 seconds.
+3. Verify the returned Assertion against the Access issuer's JWKS: issuer,
+   `aud` matching the forwarded token's `azp`, Project, and application name.
+   Require `appthrust.io/application` and `appthrust.io/application_uid`.
+4. Authorize on `scopes`, taken from the verified Assertion's signed `scope`,
+   never from IdP groups or unsigned response metadata. Exchange or verification
+   failure is 503, never a fallback to old grants or raw claims; an invalid
+   forwarded user bearer remains 401.
+
+### Go integration
+
+For a Project's own Application, supply its name explicitly:
+
 ```go
 trust := identity.FromEnv("EXPENSE")
-// The installation name equals the catalog definition name. Supply the app's
-// known name explicitly; no installation identity environment is required.
-appAccess := identity.AppAccessFromEnv("expense")
-appAccess.RequirePermissions = true
-trust.AppAccess = &appAccess
+trust.AppAccess = &identity.AppAccessConfig{
+    PlatformOrigin:     os.Getenv("PLATFORM_API_URL"),
+    Project:            os.Getenv("PLATFORM_PROJECT_ID"),
+    Application:        "expense",
+    RequirePermissions: true,
+}
 auth, err := identity.New(trust)
 if err != nil {
     return err
@@ -45,30 +66,42 @@ handler := auth.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.
 }))
 ```
 
-`AppAccessConfig` can instead be supplied explicitly with `PlatformOrigin`,
-`Project`, `Installation`, and optionally `InstallationUID`. `AppAccessFromEnv`
-reads `PLATFORM_API_URL` and `PLATFORM_PROJECT_ID`; optional
-`PLATFORM_APP_INSTALLATION_NAME` overrides the explicit name and
-`PLATFORM_APP_INSTALLATION_UID` enables the UID fence. Those installation
-variables are a planned platform addition, not currently injected. Existing
+`AppAccessConfig` requires `PlatformOrigin`, `Project`, and exactly one of
+`Application` or `Installation`. Configuring both names or neither fails at
+construction. With `Application`, the signed application name must match and
+its UID must be present; installation claims are not required.
+
+For marketplace apps, `identity.AppAccessFromEnv("expense")` still configures
+`Installation` (the catalog definition name), with an optional
+`InstallationUID` fence. It reads `PLATFORM_API_URL` and `PLATFORM_PROJECT_ID`;
+`PLATFORM_APP_INSTALLATION_NAME` and `PLATFORM_APP_INSTALLATION_UID` optionally
+override the installation identity. These installation variables are planned,
+not currently injected. Installation configuration accepts both v0.6.0-shaped
+Assertions without application claims and newer Assertions with them.
+An Assertion carrying only one of the installation name/UID pair is rejected.
+
 `PLATFORM_OIDC_ISSUER`, `PLATFORM_OIDC_ISSUER_CA_PEM`,
 `PLATFORM_ACCESS_ISSUER`, and `<prefix>_OIDC_AUDIENCES` supply trust.
+Configure the OIDC audiences for the forwarded user token.
 `<prefix>_ACCESS_AUDIENCE` still controls network key assertions only; role-only
-apps need no key audience or Space. Enabling app access without both issuers,
-Project, or installation name fails at construction.
+apps need no key audience or Space. Both issuers are required for app access.
 
 After verifying the forwarded OIDC bearer, the SDK exchanges it with no request
 body and verifies the returned ES256 Assertion's issuer, protected type/key ID,
 audience containing the bearer's `azp`, user/session kind, exact subject and
-subject issuer, Project, installation, optional UID, expiry, and at-most-five-minute
-lifetime. The platform issues 60-second Assertions. Session Assertions are
+subject issuer, Project, configured application or installation (and optional
+installation UID), expiry, and at-most-five-minute lifetime. The platform issues
+60-second Assertions. Session Assertions are
 SDK-internal and rejected as network bearers, even for a matching audience.
 Only signed `scope` grants permissions; response role names, response scopes,
 and raw groups never grant them.
 
 People retain `Kind: "user"`, their existing subject/profile/groups, and gain
-`Scopes` and `Project`. Keys retain `Kind: "key"`. Both use
-`Principal.Has("permission")` for exact permission matching.
+`Scopes` and `Project`. `Principal.Application` and `Principal.ApplicationUID`
+expose the signed application identity, when present. `accesskey.SessionClaims`
+also exposes `Application`, `ApplicationUID`, `Installation`, and
+`InstallationUID`; absent claims remain empty. Keys retain `Kind: "key"`.
+Both use `Principal.Has("permission")` for exact permission matching.
 `Identity.Access` exposes `declared` and `accepted` (nil when exchange is disabled
 or the principal is a key). `RequirePermissions` denies people with 403 when
 `declared` is true and scope is empty, including pending acceptance. Without

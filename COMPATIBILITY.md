@@ -66,3 +66,18 @@ default `RequirePermissions` guard receive 403 for a declared model with no
 permission (including an unaccepted model), while undeclared apps pass through.
 The SDK deliberately makes this guard opt-in for additive minor-release
 compatibility; applications declaring roles should enable it.
+
+## Application access (unreleased)
+
+`AppAccessConfig.Application` opts into application-bound session Assertions.
+It requires a platform exchange that includes `application` and
+`applicationUID`, with signed `appthrust.io/application` and
+`appthrust.io/application_uid` claims. Installation claims may be absent.
+Configure exactly one of `Application` or `Installation`; neither and both
+are construction errors.
+
+Installation configuration remains compatible with the v0.6 platform exchange
+and accepts the additional application claims. A partial installation name/UID
+pair is rejected in either mode. Application identity is exposed on verified
+session claims and principals; authorization still uses only signed scopes.
+
