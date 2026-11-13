@@ -24,13 +24,14 @@ const (
 )
 
 // AppAccessConfig opts an Authenticator into user-permission exchange. Project
-// and Installation are required even for an app that currently declares no roles.
-// Configuration is copied at construction and must not change afterward.
+// and exactly one of Installation or Application are required, even when the app
+// currently declares no roles. Configuration is copied at construction.
 type AppAccessConfig struct {
 	PlatformOrigin  string
 	Project         string
 	Installation    string
 	InstallationUID string
+	Application     string
 	// RequirePermissions makes Authenticate deny declared apps with empty scope.
 	RequirePermissions bool
 	// CacheSize bounds cached users and concurrent exchanges; zero uses 1024.
@@ -53,7 +54,7 @@ func AppAccessFromEnv(installation string) AppAccessConfig {
 	}
 }
 
-// AppAccess describes the installation's access model, not a grant. Only the
+// AppAccess describes the app's access model, not a grant. Only the
 // verified Principal.Scopes grants permissions. Nil Identity.Access means no exchange.
 type AppAccess struct {
 	Declared bool `json:"declared"`
@@ -65,6 +66,7 @@ type appAccessResult struct {
 	access  AppAccess
 	scopes  []string
 	expires time.Time
+	application, applicationUID string
 }
 type appAccessFlight struct {
 	done   chan struct{}
@@ -86,8 +88,8 @@ func newAppAccessClient(config AppAccessConfig, client *http.Client, verifier *a
 	if err != nil {
 		return nil, err
 	}
-	if config.Installation == "" {
-		return nil, errors.New("app access installation is required")
+	if (config.Installation == "") == (config.Application == "") {
+		return nil, errors.New("app access requires exactly one of installation or application")
 	}
 	if config.CacheSize < 0 {
 		return nil, errors.New("app access cache size must not be negative")
@@ -218,6 +220,7 @@ func (c *appAccessClient) exchange(ctx context.Context, key appAccessKey, bearer
 		Project         string    `json:"project"`
 		Installation    string    `json:"installation"`
 		InstallationUID string    `json:"installationUID"`
+		Application     string    `json:"application"`
 		Roles           []string  `json:"roles"`
 		Scopes          []string  `json:"scopes"`
 		Access          struct {
@@ -226,13 +229,16 @@ func (c *appAccessClient) exchange(ctx context.Context, key appAccessKey, bearer
 		} `json:"access"`
 	}
 	if json.Unmarshal(data, &wire) != nil || wire.Access.Declared == nil || wire.Access.Accepted == nil ||
-		wire.Audience != key.audience || wire.Project != c.config.Project || wire.Installation != c.config.Installation ||
-		(c.config.InstallationUID != "" && wire.InstallationUID != c.config.InstallationUID) {
+		wire.Audience != key.audience || wire.Project != c.config.Project ||
+		(c.config.Installation != "" && (wire.Installation != c.config.Installation ||
+			(c.config.InstallationUID != "" && wire.InstallationUID != c.config.InstallationUID))) ||
+		(c.config.Application != "" && wire.Application != c.config.Application) {
 		return appAccessResult{}, accessUnavailable("")
 	}
 	claims, err := c.verifier.VerifySession(ctx, wire.Token, accesskey.SessionBinding{
 		Audience: key.audience, Subject: key.subject, SubjectIssuer: key.issuer,
 		Project: c.config.Project, Installation: c.config.Installation, InstallationUID: c.config.InstallationUID,
+		Application: c.config.Application,
 	}, c.now())
 	if err != nil || !wire.ExpiresAt.Equal(claims.ExpiresAt) || !c.now().Before(claims.ExpiresAt) {
 		return appAccessResult{}, accessUnavailable("")
@@ -247,5 +253,6 @@ func (c *appAccessClient) exchange(ctx context.Context, key appAccessKey, bearer
 	return appAccessResult{
 		access: AppAccess{Declared: *wire.Access.Declared, Accepted: *wire.Access.Accepted},
 		scopes: claims.Scopes, expires: expires,
+		application: claims.Application, applicationUID: claims.ApplicationUID,
 	}, nil
 }

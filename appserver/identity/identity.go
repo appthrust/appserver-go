@@ -312,6 +312,8 @@ func (a *Authenticator) Authenticate(ctx context.Context, header string) (Identi
 		}
 		result.Principal.Scopes = access.scopes
 		result.Principal.Project = a.appAccess.config.Project
+		result.Principal.Application = access.application
+		result.Principal.ApplicationUID = access.applicationUID
 		result.Access = &access.access
 		if a.appAccess.config.RequirePermissions {
 			if err := checkAppAccess(result); err != nil {

@@ -11,6 +11,9 @@ type Principal struct {
 	Groups  []string
 	KeyName string
 	Project string
+	// Application identity is populated only from a verified app session.
+	Application    string
+	ApplicationUID string
 }
 
 // Has checks an exact app permission for either a person or an access key.

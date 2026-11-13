@@ -208,6 +208,80 @@ func TestAppAccessHappyPath(t *testing.T) {
 	require.EqualValues(t, 1, f.jwks.Load())
 }
 
+func TestAppAccessTargetBinding(t *testing.T) {
+	for _, tc := range []struct {
+		name                              string
+		application                       bool
+		applicationClaim, applicationUID  string
+		installationClaim, installationUID string
+		reject                            bool
+	}{
+		{name: "application", application: true, applicationClaim: "expense", applicationUID: "app-uid"},
+		{name: "application governed by installation", application: true, applicationClaim: "expense", applicationUID: "app-uid", installationClaim: "catalog-expense", installationUID: "uid-x"},
+		{name: "wrong application", application: true, applicationClaim: "other", applicationUID: "app-uid", reject: true},
+		{name: "missing application pair", application: true, reject: true},
+		{name: "missing application name", application: true, applicationUID: "app-uid", reject: true},
+		{name: "missing application UID", application: true, applicationClaim: "expense", reject: true},
+		{name: "legacy installation", installationClaim: "expense", installationUID: "uid-x"},
+		{name: "installation with application", applicationClaim: "expense-app", applicationUID: "app-uid", installationClaim: "expense", installationUID: "uid-x"},
+		{name: "application with installation name only", application: true, applicationClaim: "expense", applicationUID: "app-uid", installationClaim: "expense", reject: true},
+		{name: "application with installation UID only", application: true, applicationClaim: "expense", applicationUID: "app-uid", installationUID: "uid-x", reject: true},
+		{name: "installation name only", installationClaim: "expense", reject: true},
+		{name: "installation UID only", installationUID: "uid-x", reject: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newAppAccessFixture(t)
+			f.mutate = func(claims map[string]any) {
+				for name, value := range map[string]string{
+					"appthrust.io/application": tc.applicationClaim, "appthrust.io/application_uid": tc.applicationUID,
+					"appthrust.io/installation": tc.installationClaim, "appthrust.io/installation_uid": tc.installationUID,
+				} {
+					if value == "" {
+						delete(claims, name)
+					} else {
+						claims[name] = value
+					}
+				}
+			}
+			f.response = func(wire map[string]any) {
+				if tc.application || tc.applicationClaim != "" {
+					wire["application"] = "expense"
+					wire["applicationUID"] = "unsigned-app-uid"
+				}
+				if tc.application && tc.installationClaim == "" && tc.installationUID == "" {
+					delete(wire, "installation")
+					delete(wire, "installationUID")
+				}
+			}
+			a := f.auth(t, func(c *AppAccessConfig) {
+				if tc.application {
+					c.Application = "expense"
+					c.Installation, c.InstallationUID = "", ""
+				}
+			})
+			bearer := f.bearer(t, "person", "expense-client")
+			for range 2 {
+				if tc.reject {
+					requireAppError(t, serveAppRequest(a, bearer, false), 503, "access_unavailable")
+					continue
+				}
+				value, forwarded, err := a.Authenticate(t.Context(), bearer)
+				require.NoError(t, err)
+				require.Equal(t, bearer, forwarded)
+				require.Equal(t, tc.applicationClaim, value.Principal.Application)
+				require.Equal(t, tc.applicationUID, value.Principal.ApplicationUID)
+				require.True(t, value.Principal.Has("reports:approve"))
+				require.False(t, value.Principal.Has("untrusted:permission"))
+			}
+			if tc.reject {
+				require.EqualValues(t, 2, f.calls.Load(), "invalid assertions must not be cached")
+			} else {
+				require.EqualValues(t, 1, f.calls.Load(), "verified application identity must survive a cache hit")
+			}
+		})
+	}
+}
+
 func TestAppAccessRejectsAssertionMismatches(t *testing.T) {
 	for _, tc := range []struct {
 		name, field string
@@ -555,6 +629,35 @@ func TestAppAccessConfigurationAndEnvironment(t *testing.T) {
 	value, _, err := a.Authenticate(t.Context(), f.bearer(t, "person", "expense-client"))
 	require.NoError(t, err)
 	require.True(t, value.Principal.Has("reports:approve"))
+}
+
+func TestAppAccessConfigRequiresExactlyOneTarget(t *testing.T) {
+	f := newAppAccessFixture(t)
+	for _, tc := range []struct {
+		name, application, installation string
+		reject                          bool
+	}{
+		{name: "application", application: "expense"},
+		{name: "installation", installation: "expense"},
+		{name: "both", application: "expense", installation: "expense", reject: true},
+		{name: "neither", reject: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := f.config()
+			config.Application, config.Installation, config.InstallationUID = tc.application, tc.installation, ""
+			a, err := New(Trust{
+				OIDCIssuer: f.issuer(), OIDCAudiences: []string{"platform-api"},
+				AccessIssuer: f.server.URL + "/access", AppAccess: &config,
+			})
+			if tc.reject {
+				require.EqualError(t, err, "app access requires exactly one of installation or application")
+				require.Nil(t, a)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, a)
+			}
+		})
+	}
 }
 
 func TestAppAccessMiddlewareExposesVerifiedIdentity(t *testing.T) {
