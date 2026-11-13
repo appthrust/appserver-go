@@ -8,7 +8,7 @@ are released in this repository before platform or app consumers update.
 | v0.1 | 0.0.0-dev (platform main 2026-11-06, source b80b58c71d) |
 | v0.2 | 0.0.0-dev (platform main 2026-11-06, AI policy source 2c294ee1f5) |
 | v0.3 | Platform API with Project access and identity search (ADR-0079 follow-up) |
-| v0.6 (unreleased) | TBD: first platform release implementing ADR-0082 user-token exchange |
+| v0.6 | 0.0.0-dev (platform main 2026-11-13, ADR-0082 user-token exchange, source 791a7f4d4c) |
 
 The v0.1 packages are `accesskey`, `apphealth`, `aigatewaydiscovery`, and
 `appserver/<package>`. v0.2 adds `aipolicy`, the dependency-free AI policy
@@ -27,7 +27,7 @@ Directory imports use `IdentitySearch` and a non-empty query against
 
 ## v0.6: opt-in app authorization
 
-The minimum platform version is intentionally pending until ADR-0082 ships.
+The minimum platform is main `791a7f4d4c` (appthrust/platform#6676).
 Enabling `identity.Trust.AppAccess` requires the C8 exchange response at
 `POST /api/v1/access/user-token`, an Access issuer JWKS, and installation-bound
 session Assertions. A missing route is an availability error, never an empty
