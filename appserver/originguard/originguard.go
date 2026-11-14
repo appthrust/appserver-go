@@ -1,7 +1,7 @@
 // Package originguard rejects cross-origin management API mutations before
 // handlers or proxies run. It is not authentication, authorization, or CORS.
-// Trusted origins come from authoritative Console/Dashboard public URLs, never
-// request Host/forwarded headers, domain suffixes, or preview publications.
+// Trusted origins are static, authoritative Console/Dashboard public origins,
+// never request Host/forwarded headers, domain suffixes, or preview publications.
 //
 // Hosts are ASCII-only: operators configure internationalized hostnames in
 // A-label form. Unicode input is rejected, not IDNA-normalized; xn-- labels are
@@ -9,12 +9,15 @@
 // serialization without adding an external IDNA dependency.
 //
 // GET, HEAD, and OPTIONS bypass this guard and must not implement mutations.
-// WebSocket authorization must check Origin in the handshake separately using
-// CheckOrigin; a WebSocket upgrade GET is deliberately allowed by Guard.
+// Every WebSocket upgrade must separately pass CheckOrigin against a ready
+// snapshot before its handler or upstream dial, including non-browser clients.
+// A WebSocket upgrade GET is deliberately allowed by Guard.
 // This SDK does not implement method override headers or parameters. Consumers
 // that add overrides must resolve the effective request Method before Guard.
-// Proxies must preserve Origin and Sec-Fetch-* and run this guard before
-// removing Cookie headers, including when adding a bearer credential.
+// Proxies must preserve Origin, Cookie, and Sec-Fetch-* until the entrypoint
+// guard checks them, including when adding a bearer credential. After its guard
+// and actual bearer verification, a BFF's upstream metadata is the consumer's
+// contract. Stripping or replacing metadata without both checks is unsafe.
 package originguard
 
 import (
@@ -55,10 +58,13 @@ func Check(method string, originValues []string, fetchMetadataPresent bool, hasC
 }
 
 // CheckOrigin requires exactly one trusted Origin, without the safe-method or
-// non-browser exceptions. Use it for WebSocket handshake origin checks in
-// addition to authentication and authorization. No Origin returns
-// RequestOriginRequired; malformed, multiple, null, or untrusted values return
-// RequestOriginNotAllowed. Callers using a Source must check readiness first.
+// non-browser exceptions. Every WebSocket upgrade must call it before its
+// handler or upstream dial, in addition to authentication and authorization.
+// Pass all Origin field values (r.Header.Values("Origin") on an HTTP server),
+// not just Header.Get. No Origin returns RequestOriginRequired; malformed,
+// multiple, null, or untrusted values return RequestOriginNotAllowed. A valid
+// bearer never overrides a denial. Callers using a Source must check readiness
+// first and reject an unavailable snapshot with TrustedOriginsUnavailable.
 func CheckOrigin(originValues []string, trusted TrustedOrigins) Decision {
 	if len(originValues) == 0 {
 		return Decision{Reason: RequestOriginRequired}

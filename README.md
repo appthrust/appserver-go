@@ -19,14 +19,17 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) and the accepted
 
 ## Management request origins
 
-v0.6 adds `appserver/originguard`, an opt-in exact-Origin boundary for
-management APIs. It adds no external dependencies and uses the existing
-`httpx` JSON error envelope. Build trusted origins from authoritative installed
-Console/Dashboard public URLs, not request headers or Project domain suffixes:
+The next release, v0.7.0, adds `appserver/originguard`, an opt-in exact-Origin
+boundary for management APIs. The existing v0.6.0 tag does not contain this
+package. It adds no external dependencies and uses the existing `httpx` JSON
+error envelope. Build a static trusted-origin set from the entrypoint's
+authoritative configured public origin, not request headers or Project domain
+suffixes. The Platform API trusts only its Dashboard origin; the Console trusts
+only its own origin:
 
 ```go
 var source originguard.Snapshot // not ready until a validated set is stored
-trusted, err := originguard.NewTrustedOrigins(publicOrigins, originguard.Options{})
+trusted, err := originguard.NewTrustedOrigins([]string{publicOrigin}, originguard.Options{})
 if err != nil {
     source.Clear()
     return err
@@ -35,11 +38,12 @@ source.Store(trusted)
 handler := originguard.Guard(next, &source)
 ```
 
-Reload the complete set atomically with `Store`; call `Clear` if its authority
-is unavailable or validation fails. An explicitly constructed empty set is
-ready and trusts no origins. `Load` returns `(TrustedOrigins, bool)` with
-readiness; `Origins` returns a sorted copy for a CORS allowlist from the same
-snapshot. Requests never fetch configuration from the control plane.
+Validate and `Store` the static configuration before serving requests; invalid
+configuration must fail startup. `Snapshot` is an in-memory readiness holder,
+not a dynamic trust source: there is no controller, watch, refresh, or external
+read. `Clear` marks it unavailable. An explicitly constructed empty set is ready
+and trusts no origins. `Load` returns `(TrustedOrigins, bool)` with readiness;
+`Origins` returns a sorted copy for a CORS allowlist from the same snapshot.
 
 Origins require HTTPS, with no userinfo, path (even `/`), query, fragment,
 percent encoding, wildcard, or trailing dot. Scheme/host case and default ports
@@ -61,17 +65,59 @@ pure decision function. `Guard(next, source)` applies the following boundary:
 | No Origin, Cookie, or Sec-Fetch-* | Continue as a non-browser client; authentication is still required |
 | State-changing browser request while the snapshot is not ready | 503 `trusted_origins_unavailable` takes precedence |
 
-The middleware never reads the body or changes request headers. Install it
-before handlers/proxies and before removing Cookies. Upstream proxies must
-preserve Origin and Sec-Fetch-* even when injecting a bearer. It does not
-authenticate, authorize, or implement CORS. The SDK does not implement method
-override headers/parameters; if a consumer adds them, resolve the effective
-request method before the guard.
+The middleware never reads the body or changes request headers. Preserve the
+original Origin, Cookie, and all Sec-Fetch-* headers through edge proxies until
+the entrypoint guard has checked them, including when adding a bearer. After
+the guard and actual bearer verification, a BFF's upstream metadata handling is
+the consumer's explicit contract. In the Console-to-Platform contract:
 
-WebSocket upgrade GETs bypass this guard. Handshake authorization must
-separately call `CheckOrigin(originValues, trusted)` with a ready snapshot;
-this helper requires exactly one trusted Origin even for GET and rejects a
-missing Origin with `request_origin_required`.
+- Ordinary HTTP removes Cookie, Origin, Sec-Fetch-* and client-supplied forwarded
+  headers, forwarding only the verified user bearer as a non-browser request.
+- WebSocket forwarding replaces Origin with the configured, validated Dashboard
+  origin and removes Cookie/Sec-Fetch-* only after checking the original Console
+  origin and verifying the bearer. Never reflect an arbitrary client Origin.
+
+Metadata stripping or Origin replacement without the guard and actual bearer
+verification must never be shipped. An Authorization header's presence alone is
+not verification. The SDK does not authenticate, authorize, or implement CORS.
+It does not implement method override headers/parameters; if a consumer adds
+them, resolve the effective request method before the guard.
+
+### WebSocket upgrades
+
+**`CheckOrigin` is mandatory before every WebSocket upgrade handler or upstream
+dial.** `Guard` deliberately allows GET, including upgrade GETs, so wrapping an
+upgrade handler with `Guard` alone is insufficient. Check the snapshot's
+readiness and pass **all** Origin values, not `Header.Get("Origin")`:
+
+```go
+// Inside the consumer's WebSocket entrypoint, before authentication and upgrade.
+trusted, ready := source.Load()
+if !ready {
+    httpx.WriteJSON(w, http.StatusServiceUnavailable, &httpx.Error{
+        Code: originguard.TrustedOriginsUnavailable,
+        Message: "Trusted request origins are not available",
+    })
+    return
+}
+decision := originguard.CheckOrigin(r.Header.Values("Origin"), trusted)
+if !decision.Allowed {
+    httpx.WriteJSON(w, http.StatusForbidden, &httpx.Error{
+        Code: decision.Reason,
+        Message: "A trusted request origin is required for WebSocket upgrades",
+    })
+    return
+}
+authenticatedUpgrade.ServeHTTP(w, r)
+```
+
+`CheckOrigin` has no safe-method or non-browser exception: missing Origin is
+403 `request_origin_required`; invalid, `null`, multiple, or untrusted origins
+are 403 `request_origin_not_allowed`, even with a valid bearer. Ordinary CLI
+POSTs without Origin, Cookie, or Sec-Fetch-* may proceed to authentication;
+CLI WebSocket clients must explicitly supply an allowed Origin as well as valid
+credentials. The standard-library HTTP/WebSocket handshake test in
+`appserver/originguard/websocket_test.go` exercises this consumer composition.
 
 ## Development
 

@@ -151,15 +151,16 @@ func validDNSHost(host string) bool {
 	return true
 }
 
-// Source supplies one immutable trusted-origin snapshot and its readiness.
-// Load must be safe for concurrent requests and should only read local state,
+// Source supplies one immutable, static trusted-origin snapshot and its readiness.
+// Load must be safe for concurrent requests and only read local state. It must
 // not fetch configuration or call a control plane on the request path.
 type Source interface {
 	Load() (TrustedOrigins, bool)
 }
 
-// Snapshot atomically publishes a complete trusted-origin set. Its zero value
-// is not ready. Do not copy a Snapshot after first use.
+// Snapshot atomically publishes a complete static trusted-origin set. Its zero
+// value is not ready. Validate and Store configuration before serving requests.
+// Snapshot has no refresh, watch, or external source. Do not copy it after use.
 type Snapshot struct {
 	value atomic.Pointer[TrustedOrigins]
 }
@@ -185,8 +186,7 @@ func (s *Snapshot) Store(trusted TrustedOrigins) {
 	s.value.Store(&trusted)
 }
 
-// Clear marks the source not ready. Use it when the authoritative configuration
-// is unavailable or invalid; do not silently retain a stale trusted set.
+// Clear marks the source not ready, without retaining the previous trusted set.
 func (s *Snapshot) Clear() {
 	s.value.Store(nil)
 }
