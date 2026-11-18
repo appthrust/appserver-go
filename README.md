@@ -92,6 +92,25 @@ preserve the shared JSON error envelope and retry hints. `platformclient.Roles`,
 `ProjectAccess.Role`, and `Principal.Groups` remain available for their existing
 uses; do not use them as substitutes for app permissions.
 
+## HTTP request logs
+
+Wrap the outermost handler once with `appserver/requestlog`:
+
+```go
+server.Handler = requestlog.Wrap(mux, requestlog.Options{Service: "expense"})
+```
+
+Each completed request writes one JSON line to stderr with its method, URL
+path (no query), matched mux pattern when available, status, bytes, duration,
+and request ID. Successful `GET /healthz` and `GET /readyz` are skipped;
+failures and panics are logged. `requestlog.ID(r.Context())` returns the same
+ID sent in the `X-Request-Id` response header.
+
+`httpx.WriteError` annotates the line automatically. For other error paths,
+call `requestlog.SetError(r, err)`; for results the status cannot express,
+call `requestlog.SetOutcome(r, "partial", "upstream_closed")`. Use log-safe
+diagnostics: never pass credentials, query strings, or payloads as annotations.
+
 ## Development
 
 Go 1.26 or newer is required; CI uses Go 1.27.x.
