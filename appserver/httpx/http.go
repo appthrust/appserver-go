@@ -32,14 +32,36 @@ func WriteJSON(w http.ResponseWriter, status int, body any) {
 
 func WriteError(w http.ResponseWriter, err error, service string) {
 	var apiError *Error
-	if !errors.As(err, &apiError) {
-		log.Printf("%s request failed: %v", service, err)
+	typed := errors.As(err, &apiError)
+	var detail error
+	if !typed {
+		detail = err
 		apiError = &Error{Status: 500, Code: "internal_error", Message: "The " + service + " could not complete this request"}
+	}
+	if !recordRequestError(w, apiError.Code, detail) && !typed {
+		log.Printf("%s request failed: %v", service, err)
 	}
 	if apiError.RetryAfter != "" {
 		w.Header().Set("Retry-After", apiError.RetryAfter)
 	}
 	WriteJSON(w, apiError.Status, apiError)
+}
+
+// recordRequestError recognizes requestlog's writer without importing the
+// package (requestlog itself recognizes *Error in SetError).
+func recordRequestError(w http.ResponseWriter, code string, detail error) bool {
+	for w != nil {
+		switch v := w.(type) {
+		case interface{ RecordRequestError(string, error) }:
+			v.RecordRequestError(code, detail)
+			return true
+		case interface{ Unwrap() http.ResponseWriter }:
+			w = v.Unwrap()
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func Data[T any](items []T) any {

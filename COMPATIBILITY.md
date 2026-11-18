@@ -9,6 +9,7 @@ are released in this repository before platform or app consumers update.
 | v0.2 | 0.0.0-dev (platform main 2026-11-06, AI policy source 2c294ee1f5) |
 | v0.3 | Platform API with Project access and identity search (ADR-0079 follow-up) |
 | v0.6 | 0.0.0-dev (platform main 2026-11-13, ADR-0082 user-token exchange, source 791a7f4d4c) |
+| v0.7 | Same as v0.6; request logging requires no platform change |
 
 The v0.1 packages are `accesskey`, `apphealth`, `aigatewaydiscovery`, and
 `appserver/<package>`. v0.2 adds `aipolicy`, the dependency-free AI policy
@@ -66,3 +67,9 @@ default `RequirePermissions` guard receive 403 for a declared model with no
 permission (including an unaccepted model), while undeclared apps pass through.
 The SDK deliberately makes this guard opt-in for additive minor-release
 compatibility; applications declaring roles should enable it.
+
+## v0.7: opt-in request logs
+
+`appserver/requestlog` adds structured HTTP request logging. The minimum
+platform version is unchanged. Without `requestlog.Wrap`, `httpx.WriteError`
+keeps its existing response and logging behavior.
