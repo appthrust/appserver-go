@@ -10,6 +10,7 @@ are released in this repository before platform or app consumers update.
 | v0.3 | Platform API with Project access and identity search (ADR-0079 follow-up) |
 | v0.6 | 0.0.0-dev (platform main 2026-11-13, ADR-0082 user-token exchange, source 791a7f4d4c) |
 | v0.7 | Same as v0.6; request logging requires no platform change |
+| v0.8 | Platform API containing appthrust/platform#7087 (source c372f9232b4beba3813289f95d2c69d5f6e704d4), signed principal and group grants |
 
 The v0.1 packages are `accesskey`, `apphealth`, `aigatewaydiscovery`, and
 `appserver/<package>`. v0.2 adds `aipolicy`, the dependency-free AI policy
@@ -73,3 +74,25 @@ compatibility; applications declaring roles should enable it.
 `appserver/requestlog` adds structured HTTP request logging. The minimum
 platform version is unchanged. Without `requestlog.Wrap`, `httpx.WriteError`
 keeps its existing response and logging behavior.
+
+## v0.8: signed person keys and group grants
+
+`accesskey.SessionClaims` and `identity.AppAccess` add `Principal string` and
+`GroupGrants []accesskey.GroupGrant`. Each grant contains a per-app `Group` key
+and its `Permissions`. `Identity.Access.Principal` is the single durable author
+key to store; existing OIDC subjects remain available for compatibility.
+Caller-owned grant slices cannot mutate cached results or concurrent callers.
+
+Upgrade the Platform API to #7087 or later before updating consumers. Unlike
+v0.6/v0.7, a session Assertion missing its signed principal or group grants is
+invalid, not an identity fallback or an empty grant. Identity middleware returns
+503 `access_unavailable`. Existing key authentication, nil `Trust.AppAccess`,
+installation binding, `Principal.Has`, and permission guards are unchanged.
+The fields are additive, but this minimum-platform requirement is intentional.
+The missing-principal error explicitly names the absent signed claim and
+`Platform API must include #7087` in its message.
+
+Go module versions come from Git tags, not a version field in `go.mod`.
+After integration and CI, publish a `v0.8.0` tag and update consuming apps'
+`go.mod`/`go.sum` to that tag. The repository's `ci.yml` tests pushes and pull
+requests; it does not create release tags automatically.

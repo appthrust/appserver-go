@@ -5,7 +5,9 @@ import "slices"
 // Principal is the common backend identity for user sessions and access keys.
 // Key assertions never supply groups; authorization must also bind Project.
 type Principal struct {
-	Kind    string
+	Kind string
+	// Subject is retained for compatibility. For app session authors/owners, store
+	// identity.Identity.Access.Principal (the signed person key) instead.
 	Subject string
 	Scopes  []string
 	Groups  []string

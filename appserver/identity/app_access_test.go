@@ -24,6 +24,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var (
+	appAccessPrincipal = "u_" + strings.Repeat("A", 43)
+	appAccessGroup     = "g_" + strings.Repeat("B", 42) + "A"
+)
+
 type appAccessFixture struct {
 	server       *httptest.Server
 	key          *ecdsa.PrivateKey
@@ -104,6 +109,7 @@ func newAppAccessFixture(t *testing.T) *appAccessFixture {
 				"scope": f.scope.Load().(string), "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "test-id",
 				"appthrust.io/credential": "session", "appthrust.io/subject_kind": "user", "appthrust.io/subject_issuer": user.Issuer,
 				"appthrust.io/project": "project-x", "appthrust.io/installation": "expense", "appthrust.io/installation_uid": "uid-x",
+				"appthrust.io/principal": appAccessPrincipal, "appthrust.io/group_grants": []map[string]any{{"group": appAccessGroup, "permissions": []string{"reports:read"}}},
 			}
 			if f.mutate != nil {
 				f.mutate(claims)
@@ -188,6 +194,10 @@ func requireAppError(t *testing.T, w *httptest.ResponseRecorder, status int, cod
 
 func TestAppAccessHappyPath(t *testing.T) {
 	f := newAppAccessFixture(t)
+	f.response = func(body map[string]any) {
+		body["principal"] = "unsigned-person"
+		body["groupGrants"] = []map[string]any{{"group": "unsigned-group", "permissions": []string{"reports:approve"}}}
+	}
 	a := f.auth(t, nil)
 	bearer := f.bearer(t, "person", "expense-client")
 	value, forwarded, err := a.Authenticate(t.Context(), bearer)
@@ -203,9 +213,30 @@ func TestAppAccessHappyPath(t *testing.T) {
 	require.False(t, value.Principal.Has("Admin"))
 	require.False(t, value.Principal.Has("accounting"))
 	require.False(t, value.Principal.Has("untrusted:permission"))
-	require.Equal(t, &AppAccess{Declared: true, Accepted: true}, value.Access)
+	require.Equal(t, &AppAccess{Declared: true, Accepted: true, Principal: appAccessPrincipal,
+		GroupGrants: []accesskey.GroupGrant{{Group: appAccessGroup, Permissions: []string{"reports:read"}}}}, value.Access)
 	require.EqualValues(t, 1, f.calls.Load())
 	require.EqualValues(t, 1, f.jwks.Load())
+}
+
+func TestAppAccessMissingSignedPrincipalExplainsPlatformUpgrade(t *testing.T) {
+	f := newAppAccessFixture(t)
+	f.mutate = func(claims map[string]any) { delete(claims, "appthrust.io/principal") }
+	f.response = func(body map[string]any) { body["principal"] = appAccessPrincipal }
+	a := f.auth(t, nil)
+	bearer := f.bearer(t, "person", "expense-client")
+	value, _, err := a.Authenticate(t.Context(), bearer)
+	require.Equal(t, Identity{}, value)
+	var unavailable *httpx.Error
+	require.ErrorAs(t, err, &unavailable)
+	require.Equal(t, http.StatusServiceUnavailable, unavailable.Status)
+	require.Equal(t, "access_unavailable", unavailable.Code)
+	require.Equal(t, "App access verification is unavailable: missing signed principal (appthrust.io/principal); Platform API must include #7087", unavailable.Message)
+	w := serveAppRequest(a, bearer, false)
+	requireAppError(t, w, http.StatusServiceUnavailable, "access_unavailable")
+	require.Contains(t, w.Body.String(), "missing signed principal")
+	require.Contains(t, w.Body.String(), "Platform API must include #7087")
+	require.EqualValues(t, 2, f.calls.Load(), "missing signed facts must not be cached")
 }
 
 func TestAppAccessRejectsAssertionMismatches(t *testing.T) {
@@ -226,6 +257,10 @@ func TestAppAccessRejectsAssertionMismatches(t *testing.T) {
 		{"over_long_lifetime", "iat", time.Now().Add(-6 * time.Minute).Unix()},
 		{"missing_iat", "iat", nil},
 		{"future_iat", "iat", time.Now().Add(time.Hour).Unix()},
+		{"missing_principal", "appthrust.io/principal", nil},
+		{"malformed_principal", "appthrust.io/principal", "u_person"},
+		{"missing_grants", "appthrust.io/group_grants", nil},
+		{"malformed_grants", "appthrust.io/group_grants", []map[string]any{{"group": appAccessGroup, "permissions": "reports:read"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newAppAccessFixture(t)
@@ -348,11 +383,17 @@ func TestAppAccessCacheHitExpiryAndNoStaleFallback(t *testing.T) {
 	require.NoError(t, err)
 	value.Principal.Scopes[0] = "poison"
 	value.Access.Declared = false
+	value.Access.Principal = "poison"
+	value.Access.GroupGrants[0].Group = "poison"
+	value.Access.GroupGrants[0].Permissions[0] = "poison"
 	f.now.Add(54)
 	value, _, err = a.Authenticate(t.Context(), bearer)
 	require.NoError(t, err)
 	require.True(t, value.Principal.Has("reports:read"))
 	require.True(t, value.Access.Declared)
+	require.Equal(t, appAccessPrincipal, value.Access.Principal)
+	require.Equal(t, appAccessGroup, value.Access.GroupGrants[0].Group)
+	require.Equal(t, []string{"reports:read"}, value.Access.GroupGrants[0].Permissions)
 	require.EqualValues(t, 1, f.calls.Load())
 	f.now.Add(1) // exp minus the five-second skew expires at this exact boundary.
 	f.scope.Store("reports:read")
@@ -567,6 +608,8 @@ func TestAppAccessMiddlewareExposesVerifiedIdentity(t *testing.T) {
 		require.True(t, ok)
 		require.True(t, value.Principal.Has("reports:approve"))
 		require.Equal(t, "user", value.Principal.Kind)
+		require.Equal(t, appAccessPrincipal, value.Access.Principal)
+		require.Equal(t, appAccessGroup, value.Access.GroupGrants[0].Group)
 		w.WriteHeader(http.StatusNoContent)
 	})))
 	req := httptest.NewRequest(http.MethodGet, "/reports", nil)

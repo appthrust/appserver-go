@@ -19,8 +19,8 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) and the accepted
 
 ## App permissions (ADR-0082)
 
-App access is opt-in and requires a platform implementing
-`POST /api/v1/access/user-token` (see the pending minimum version in
+App access is opt-in and requires a Platform API containing
+appthrust/platform#7087 (signed person keys and group grants; see
 [COMPATIBILITY.md](COMPATIBILITY.md)). Existing authenticators and Project-role
 APIs remain unchanged when `Trust.AppAccess` is nil.
 
@@ -69,8 +69,31 @@ and raw groups never grant them.
 People retain `Kind: "user"`, their existing subject/profile/groups, and gain
 `Scopes` and `Project`. Keys retain `Kind: "key"`. Both use
 `Principal.Has("permission")` for exact permission matching.
-`Identity.Access` exposes `declared` and `accepted` (nil when exchange is disabled
-or the principal is a key). `RequirePermissions` denies people with 403 when
+`Identity.Access` exposes `Declared`, `Accepted`, and the verified Assertion's:
+
+- `Principal string`: the durable person key (`u_…`). Store this single string
+  as the author/owner key instead of the original OIDC `Principal.Subject`.
+- `GroupGrants []accesskey.GroupGrant`: each entry has `Group string` (`g_…`)
+  and `Permissions []string`, containing only that group's contribution. The
+  slice and its nested permission slices belong to the caller, including cache
+  hits and concurrent exchanges. An explicit empty array produces a non-nil
+  empty slice. These are per-app keys, not group names or all IdP memberships.
+
+The low-level `accesskey.Verifier.VerifySession` returns the same signed fields
+in `SessionClaims`. Neither unsigned exchange metadata nor the incoming OIDC
+claims supplies a fallback. Keys require 43 unpadded base64url characters after
+their prefix. Group grants are bounded to 64 entries and 8 KiB of encoded JSON;
+permission names follow the platform's format and 64-character limit.
+Missing/invalid signed facts fail verification (`ErrInvalidAssertion`) and become
+503 `access_unavailable` through the identity middleware. A missing principal
+matches `ErrMissingSignedPrincipal` as well as `ErrInvalidAssertion`. Its
+verification error and the identity error's message identify
+`missing signed principal (appthrust.io/principal); Platform API must include #7087`,
+so a caller logging the error can distinguish an estate that needs updating.
+Other HTTP verification errors remain generic.
+
+`Identity.Access` is nil when exchange is disabled or the principal is a key.
+`RequirePermissions` denies people with 403 when
 `declared` is true and scope is empty, including pending acceptance. Without
 declared roles it passes through. Alternatively apply the same guard per route
 with `auth.Middleware(identity.RequireAppAccess(handler))`. Permission-specific
@@ -91,6 +114,9 @@ Custom authentication middleware must use `identity.WriteError(w, err)` to
 preserve the shared JSON error envelope and retry hints. `platformclient.Roles`,
 `ProjectAccess.Role`, and `Principal.Groups` remain available for their existing
 uses; do not use them as substitutes for app permissions.
+
+Update the Platform API before adopting this SDK version on an older estate.
+This change adds no display-name API or `RequireUser` helper.
 
 ## HTTP request logs
 
