@@ -53,11 +53,16 @@ func AppAccessFromEnv(installation string) AppAccessConfig {
 	}
 }
 
-// AppAccess describes the installation's access model, not a grant. Only the
-// verified Principal.Scopes grants permissions. Nil Identity.Access means no exchange.
+// AppAccess contains the installation's access model and signed person/group facts.
+// Only verified Principal.Scopes grants overall permissions. Nil Identity.Access means no exchange.
 type AppAccess struct {
 	Declared bool `json:"declared"`
 	Accepted bool `json:"accepted"`
+	// Principal is the platform-signed durable person key to store for authors/owners.
+	Principal string `json:"principal"`
+	// GroupGrants are per-app group keys, not IdP memberships or group names.
+	// Each caller owns its grants and nested permission slices.
+	GroupGrants []accesskey.GroupGrant `json:"groupGrants"`
 }
 
 type appAccessKey struct{ issuer, subject, audience string }
@@ -66,6 +71,16 @@ type appAccessResult struct {
 	scopes  []string
 	expires time.Time
 }
+
+func (r appAccessResult) clone() appAccessResult {
+	r.scopes = slices.Clone(r.scopes)
+	r.access.GroupGrants = slices.Clone(r.access.GroupGrants)
+	for i := range r.access.GroupGrants {
+		r.access.GroupGrants[i].Permissions = slices.Clone(r.access.GroupGrants[i].Permissions)
+	}
+	return r
+}
+
 type appAccessFlight struct {
 	done   chan struct{}
 	result appAccessResult
@@ -112,7 +127,7 @@ func accessUnavailable(retryAfter string) error {
 }
 
 // resolve is called only after OIDC verification; neither the bearer nor the
-// returned assertion is retained in the cache. Each caller owns its scope slice.
+// returned assertion is retained in the cache. Each caller owns its scope and grant slices.
 func (c *appAccessClient) resolve(ctx context.Context, key appAccessKey, bearer string) (appAccessResult, error) {
 	if key.issuer == "" || key.subject == "" || key.audience == "" {
 		return appAccessResult{}, httpx.Fail(http.StatusUnauthorized, "unauthenticated", "A valid app user bearer is required")
@@ -124,8 +139,7 @@ func (c *appAccessClient) resolve(ctx context.Context, key appAccessKey, bearer 
 	if cached, found := c.cache[key]; found {
 		if c.now().Before(cached.expires) {
 			c.mu.Unlock()
-			cached.scopes = slices.Clone(cached.scopes)
-			return cached, nil
+			return cached.clone(), nil
 		}
 		delete(c.cache, key)
 	}
@@ -139,9 +153,7 @@ func (c *appAccessClient) resolve(ctx context.Context, key appAccessKey, bearer 
 			if !c.now().Before(flight.result.expires) {
 				return appAccessResult{}, accessUnavailable("")
 			}
-			result := flight.result
-			result.scopes = slices.Clone(result.scopes)
-			return result, nil
+			return flight.result.clone(), nil
 		case <-ctx.Done():
 			return appAccessResult{}, accessUnavailable("")
 		}
@@ -174,8 +186,7 @@ func (c *appAccessClient) resolve(ctx context.Context, key appAccessKey, bearer 
 	delete(c.flights, key)
 	close(flight.done)
 	c.mu.Unlock()
-	result.scopes = slices.Clone(result.scopes)
-	return result, err
+	return result.clone(), err
 }
 
 func (c *appAccessClient) exchange(ctx context.Context, key appAccessKey, bearer string) (appAccessResult, error) {
@@ -234,6 +245,10 @@ func (c *appAccessClient) exchange(ctx context.Context, key appAccessKey, bearer
 		Audience: key.audience, Subject: key.subject, SubjectIssuer: key.issuer,
 		Project: c.config.Project, Installation: c.config.Installation, InstallationUID: c.config.InstallationUID,
 	}, c.now())
+	if errors.Is(err, accesskey.ErrMissingSignedPrincipal) {
+		return appAccessResult{}, httpx.Fail(http.StatusServiceUnavailable, "access_unavailable",
+			"App access verification is unavailable: missing signed principal (appthrust.io/principal); Platform API must include #7087")
+	}
 	if err != nil || !wire.ExpiresAt.Equal(claims.ExpiresAt) || !c.now().Before(claims.ExpiresAt) {
 		return appAccessResult{}, accessUnavailable("")
 	}
@@ -245,7 +260,8 @@ func (c *appAccessClient) exchange(ctx context.Context, key appAccessKey, bearer
 		expires = localExpiry
 	}
 	return appAccessResult{
-		access: AppAccess{Declared: *wire.Access.Declared, Accepted: *wire.Access.Accepted},
+		access: AppAccess{Declared: *wire.Access.Declared, Accepted: *wire.Access.Accepted,
+			Principal: claims.Principal, GroupGrants: claims.GroupGrants},
 		scopes: claims.Scopes, expires: expires,
 	}, nil
 }
