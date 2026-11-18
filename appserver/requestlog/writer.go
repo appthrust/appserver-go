@@ -28,6 +28,12 @@ func (w *responseWriter) WriteHeader(status int) {
 	if w.hijacked {
 		return
 	}
+	// http.MaxBytesReader asks the server to close the connection through an
+	// unexported method this wrapper cannot forward; restore that for the
+	// status handlers answer an oversized body with.
+	if status == http.StatusRequestEntityTooLarge {
+		w.Header().Set("Connection", "close")
+	}
 	w.ResponseWriter.WriteHeader(status)
 	// Informational headers other than 101 may precede the final status.
 	if w.status == 0 && (status >= 200 || status == http.StatusSwitchingProtocols) {

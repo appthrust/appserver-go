@@ -390,3 +390,21 @@ func TestUpstreamDerivedErrorCodeIsNotLoggedVerbatim(t *testing.T) {
 		t.Fatalf("line = %s", out.String())
 	}
 }
+
+func TestOversizedBodyStillClosesTheConnection(t *testing.T) {
+	handler := requestlog.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4)); err != nil {
+			http.Error(w, "too large", http.StatusRequestEntityTooLarge)
+		}
+	}), requestlog.Options{Service: "svc", Output: io.Discard})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	response, err := http.Post(server.URL, "text/plain", strings.NewReader("0123456789"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusRequestEntityTooLarge || !response.Close {
+		t.Fatalf("status %d, Connection: close = %v", response.StatusCode, response.Close)
+	}
+}
