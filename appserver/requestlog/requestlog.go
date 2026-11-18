@@ -98,6 +98,9 @@ func Wrap(next http.Handler, opts Options) http.Handler {
 				Method: method, Path: path, Route: r.Pattern, Status: status, Bytes: rw.bytes,
 				DurationMS: float64(end.Sub(start)) / float64(time.Millisecond), ID: s.id, Panic: panicked,
 			}
+			if rw.sentID != "" {
+				e.ID = rw.sentID // matches what the client received
+			}
 			if status >= 500 || e.Panic {
 				e.Level = "error"
 			}
@@ -190,6 +193,11 @@ func (s *requestState) addTo(e *entry) {
 	e.ErrorCode, e.Outcome, e.Reason = s.errorCode, s.outcome, s.reason
 	detail := s.detail
 	s.mu.Unlock()
+	// Codes are fixed tokens by convention, but some apps forward one from an
+	// upstream response; never let arbitrary text reach the line through it.
+	if e.ErrorCode != "" && !validID(e.ErrorCode) {
+		e.ErrorCode = "other"
+	}
 	if detail != nil && (e.Status >= 500 || e.Panic) {
 		text := detail.Error()
 		// Discard invalid bytes, including a partial rune at the cut.

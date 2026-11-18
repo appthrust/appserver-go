@@ -360,3 +360,33 @@ func TestConcurrentLines(t *testing.T) {
 		t.Fatalf("got %d distinct lines, want %d", len(seen), n)
 	}
 }
+
+func TestLoggedRequestIDIsTheOneSentToTheClient(t *testing.T) {
+	var out bytes.Buffer
+	handler := requestlog.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Request-Id", "42") // an app with its own ID contract
+		w.WriteHeader(http.StatusAccepted)
+	}), requestlog.Options{Service: "svc", Output: &out})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/chat", nil))
+	var line struct {
+		ID string `json:"request_id"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &line); err != nil {
+		t.Fatal(err)
+	}
+	if got := recorder.Header().Get("X-Request-Id"); got != "42" || line.ID != got {
+		t.Fatalf("header %q, logged %q; want both 42", got, line.ID)
+	}
+}
+
+func TestUpstreamDerivedErrorCodeIsNotLoggedVerbatim(t *testing.T) {
+	var out bytes.Buffer
+	handler := requestlog.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		httpx.WriteError(w, httpx.Fail(http.StatusBadGateway, "secret text from upstream body", "x"), "svc")
+	}), requestlog.Options{Service: "svc", Output: &out})
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	if strings.Contains(out.String(), "secret text") || !strings.Contains(out.String(), `"error_code":"other"`) {
+		t.Fatalf("line = %s", out.String())
+	}
+}

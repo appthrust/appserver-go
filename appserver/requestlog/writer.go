@@ -14,6 +14,7 @@ type responseWriter struct {
 	status   int // zero until a final status is committed
 	bytes    int64
 	hijacked bool
+	sentID   string // X-Request-Id on the response when the status was committed
 }
 
 func (w *responseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
@@ -30,13 +31,22 @@ func (w *responseWriter) WriteHeader(status int) {
 	w.ResponseWriter.WriteHeader(status)
 	// Informational headers other than 101 may precede the final status.
 	if w.status == 0 && (status >= 200 || status == http.StatusSwitchingProtocols) {
-		w.status = status
+		w.commit(status)
+	}
+}
+
+// commit records the final status and the request ID the client receives; a
+// handler with its own ID contract may have replaced the header.
+func (w *responseWriter) commit(status int) {
+	w.status = status
+	if id := w.Header().Values("X-Request-Id"); len(id) == 1 && validID(id[0]) {
+		w.sentID = id[0]
 	}
 }
 
 func (w *responseWriter) wrote(n int) {
 	if w.status == 0 {
-		w.status = http.StatusOK
+		w.commit(http.StatusOK)
 	}
 	w.bytes += int64(n)
 }
