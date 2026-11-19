@@ -128,8 +128,10 @@ server.Handler = requestlog.Wrap(mux, requestlog.Options{Service: "expense"})
 
 Each completed request writes one JSON line to stderr with its method, URL
 path (no query), matched mux pattern when available, status, bytes, duration,
-and request ID. Successful `GET /healthz` and `GET /readyz` are skipped;
-failures and panics are logged. `requestlog.ID(r.Context())` returns the same
+and request ID. Probes (`GET /healthz`, `GET /readyz` and
+`GET /.well-known/appthrust/health`) are not logged when they succeed and are
+logged once per failure streak, so a slow start does not write a line per
+poll. Panics are logged. `requestlog.ID(r.Context())` returns the same
 ID sent in the `X-Request-Id` response header.
 
 `httpx.WriteError` annotates the line automatically. For other error paths,

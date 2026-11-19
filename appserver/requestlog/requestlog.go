@@ -20,9 +20,12 @@ import (
 // Options configures Wrap. Service is the app's required catalog name.
 type Options struct {
 	Service string
-	Output  io.Writer                // Defaults to os.Stderr.
-	Now     func() time.Time         // Defaults to time.Now.
-	Skip    func(*http.Request) bool // Suppress successful requests only; defaults to GET /healthz and /readyz.
+	Output  io.Writer        // Defaults to os.Stderr.
+	Now     func() time.Time // Defaults to time.Now.
+	// Skip marks probe requests: a success is never logged and a failure is
+	// logged once per failure streak. Defaults to GET /healthz, /readyz and
+	// /.well-known/appthrust/health.
+	Skip func(*http.Request) bool
 }
 
 type entry struct {
@@ -67,10 +70,18 @@ func Wrap(next http.Handler, opts Options) http.Handler {
 	}
 	if opts.Skip == nil {
 		opts.Skip = func(r *http.Request) bool {
-			return r.Method == http.MethodGet && (r.URL.Path == "/healthz" || r.URL.Path == "/readyz")
+			if r.Method != http.MethodGet {
+				return false
+			}
+			switch r.URL.Path {
+			case "/healthz", "/readyz", "/.well-known/appthrust/health":
+				return true
+			}
+			return false
 		}
 	}
 	var output io.Writer = lineWriter{opts.Output}
+	probes := &probeStreaks{failing: map[string]bool{}}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := opts.Now()
 		s := &requestState{id: requestID(r.Header.Values("X-Request-Id"))}
@@ -90,7 +101,7 @@ func Wrap(next http.Handler, opts Options) http.Handler {
 					status = http.StatusInternalServerError
 				}
 			}
-			if !panicked && status >= 200 && status < 300 && opts.Skip(r) {
+			if !panicked && opts.Skip(r) && probes.quiet(method+" "+path, status >= 200 && status < 300) {
 				return
 			}
 			e := entry{
@@ -203,4 +214,30 @@ func (s *requestState) addTo(e *entry) {
 		// Discard invalid bytes, including a partial rune at the cut.
 		e.Error = strings.ToValidUTF8(text[:min(len(text), 512)], "")
 	}
+}
+
+// probeStreaks remembers which probes are failing so a failure streak writes
+// one line. It is bounded: a custom Skip may match arbitrary paths.
+type probeStreaks struct {
+	mu      sync.Mutex
+	failing map[string]bool
+}
+
+const maxProbeStreaks = 64
+
+// quiet reports whether this probe result should not be logged.
+func (p *probeStreaks) quiet(key string, ok bool) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if ok {
+		delete(p.failing, key)
+		return true
+	}
+	if p.failing[key] {
+		return true
+	}
+	if len(p.failing) < maxProbeStreaks {
+		p.failing[key] = true
+	}
+	return false
 }
