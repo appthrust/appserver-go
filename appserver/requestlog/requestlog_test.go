@@ -408,3 +408,34 @@ func TestOversizedBodyStillClosesTheConnection(t *testing.T) {
 		t.Fatalf("status %d, Connection: close = %v", response.StatusCode, response.Close)
 	}
 }
+
+func TestProbeFailureIsLoggedOncePerStreak(t *testing.T) {
+	var out bytes.Buffer
+	status := http.StatusServiceUnavailable
+	handler := requestlog.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+	}), requestlog.Options{Service: "svc", Output: &out})
+	probe := func(path string) {
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
+	}
+	lines := func() int { return strings.Count(out.String(), "\n") }
+
+	for range 5 { // a slow start: every poll fails
+		probe("/readyz")
+	}
+	if lines() != 1 {
+		t.Fatalf("failing streak wrote %d lines, want 1: %s", lines(), out.String())
+	}
+	status = http.StatusOK
+	probe("/readyz")
+	probe("/.well-known/appthrust/health")
+	if lines() != 1 {
+		t.Fatalf("successful probes were logged: %s", out.String())
+	}
+	status = http.StatusServiceUnavailable
+	probe("/readyz") // a new streak after recovery
+	probe("/readyz")
+	if lines() != 2 {
+		t.Fatalf("second streak wrote %d lines in total, want 2: %s", lines(), out.String())
+	}
+}
