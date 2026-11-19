@@ -20,8 +20,8 @@ import (
 // Options configures Wrap. Service is the app's required catalog name.
 type Options struct {
 	Service string
-	Output  io.Writer                // Defaults to os.Stderr.
-	Now     func() time.Time         // Defaults to time.Now.
+	Output  io.Writer        // Defaults to os.Stderr.
+	Now     func() time.Time // Defaults to time.Now.
 	// Skip marks probe requests: a success is never logged and a failure is
 	// logged once per failure streak. Defaults to GET /healthz, /readyz and
 	// /.well-known/appthrust/health.
